@@ -1,0 +1,203 @@
+{
+  "name": "OTP & Voucher Handler - Fixed",
+  "nodes": [
+    {
+      "parameters": {
+        "multipleMethods": true,
+        "httpMethod": ["POST"],
+        "path": "ios-sms",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "e891aec9-a970-4a3b-883c-bda27670d529",
+      "name": "OTP/Voucher Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [32, 336],
+      "webhookId": "auto-generated"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===========================================\n// OTP & VOUCHER PARSER WITH TTL GLOBALS\n// ===========================================\n\n// Use n8n's built-in date functionality and native JS Date\nconst GLOBAL_TTL_SECONDS = 40; // 2 minutes TTL for all stored data\n\n// ===========================================\n// UTILITY FUNCTIONS\n// ===========================================\n\n/**\n * Get current ISO timestamp\n */\nfunction getCurrentTimestamp() {\n  return new Date().toISOString();\n}\n\n/**\n * Add seconds to a date and return ISO string\n */\nfunction addSecondsToDate(date, seconds) {\n  const newDate = new Date(date);\n  newDate.setTime(newDate.getTime() + (seconds * 1000));\n  return newDate.toISOString();\n}\n\n/**\n * Check if a date is before another date\n */\nfunction isDateBefore(date1, date2) {\n  return new Date(date1) < new Date(date2);\n}\n\n/**\n * Initialize or get global storage with TTL\n */\nfunction getGlobalStorage() {\n  const storage = $getWorkflowStaticData('global').voucher_automation || {\n    mobile_otp: null,\n    payment_otp: null,\n    voucher_code: null,\n    voucher_pin: null,\n    last_updated: null,\n    expires_at: null\n  };\n  return storage;\n}\n\n/**\n * Save data to global storage with TTL\n */\nfunction saveToGlobals(key, value, type = 'otp') {\n  const storage = getGlobalStorage();\n  const now = getCurrentTimestamp();\n  const expiresAt = addSecondsToDate(now, GLOBAL_TTL_SECONDS);\n  \n  storage[key] = value;\n  storage.last_updated = now;\n  storage.expires_at = expiresAt;\n  \n  // Save back to globals using n8n's static data\n  $getWorkflowStaticData('global').voucher_automation = storage;\n  \n  return {\n    success: true,\n    stored: key,\n    value: value,\n    expires_at: expiresAt,\n    type: type\n  };\n}\n\n/**\n * Check if stored data is still valid (not expired)\n */\nfunction isDataValid() {\n  const storage = getGlobalStorage();\n  if (!storage.expires_at) return false;\n  \n  const now = getCurrentTimestamp();\n  const expiresAt = storage.expires_at;\n  \n  return isDateBefore(now, expiresAt);\n}\n\n/**\n * Clear expired data\n */\nfunction clearExpiredData() {\n  if (!isDataValid()) {\n    const storage = {\n      mobile_otp: null,\n      payment_otp: null,\n      voucher_code: null,\n      voucher_pin: null,\n      last_updated: null,\n      expires_at: null\n    };\n    $getWorkflowStaticData('global').voucher_automation = storage;\n    return { cleared: true, reason: 'expired' };\n  }\n  return { cleared: false, reason: 'still_valid' };\n}\n\n// ===========================================\n// PARSING FUNCTIONS\n// ===========================================\n\n/**\n * Parse Mobile OTP from various message formats\n */\nfunction parseMobileOTP(content) {\n  const patterns = [\n    /(?:OTP|otp)\\s*:?\\s*(\\d{4,8})/i,\n    /(?:verification|verify)\\s*(?:code|otp)\\s*:?\\s*(\\d{4,8})/i,\n    /(\\d{4,8})\\s*(?:is\\s*your|your)\\s*(?:OTP|verification|code)/i,\n    /(?:mobile|phone)\\s*(?:OTP|otp)\\s*:?\\s*(\\d{4,8})/i,\n    /(?:code|OTP)\\s*(\\d{4,8})/i,\n    /\\b(\\d{6})\\b/ // Fallback: any 6-digit number\n  ];\n  \n  for (const pattern of patterns) {\n    const match = content.match(pattern);\n    if (match && match[1]) {\n      const otp = match[1];\n      if (otp.length >= 4 && otp.length <= 8) {\n        return {\n          success: true,\n          otp: otp,\n          type: 'mobile_otp',\n          pattern_used: pattern.toString(),\n          confidence: 'high'\n        };\n      }\n    }\n  }\n  \n  return {\n    success: false,\n    error: 'No mobile OTP pattern found',\n    type: 'mobile_otp',\n    content_preview: content.substring(0, 100)\n  };\n}\n\n/**\n * Parse Payment OTP (SafeKey/Bank OTP) - Enhanced for SafeKey messages\n */\nfunction parsePaymentOTP(content) {\n  const patterns = [\n    // SafeKey specific patterns\n    /(?:safekey|safe\\s*key).*?(?:is\\s*)?(\\d{4,8})/i,\n    /(?:OTP|otp).*?(?:for|to).*?(?:inr|usd|rs).*?(?:is\\s*)?(\\d{4,8})/i,\n    // General patterns\n    /(?:safekey|safe\\s*key)\\s*(?:OTP|otp)\\s*:?\\s*(\\d{4,8})/i,\n    /(?:payment|transaction|bank)\\s*(?:OTP|otp|verification)\\s*:?\\s*(\\d{4,8})/i,\n    /(?:verify|verification)\\s*(?:payment|transaction)\\s*:?\\s*(\\d{4,8})/i,\n    /(?:OTP|otp)\\s*(?:for|to)\\s*(?:payment|transaction)\\s*:?\\s*(\\d{4,8})/i,\n    /(?:bank|banking)\\s*(?:OTP|otp)\\s*:?\\s*(\\d{4,8})/i,\n    /\\b(\\d{6})\\b/ // Fallback: any 6-digit number\n  ];\n  \n  for (const pattern of patterns) {\n    const match = content.match(pattern);\n    if (match && match[1]) {\n      const otp = match[1];\n      if (otp.length >= 4 && otp.length <= 8) {\n        return {\n          success: true,\n          otp: otp,\n          type: 'payment_otp',\n          pattern_used: pattern.toString(),\n          confidence: 'high'\n        };\n      }\n    }\n  }\n  \n  return {\n    success: false,\n    error: 'No payment OTP pattern found',\n    type: 'payment_otp',\n    content_preview: content.substring(0, 100)\n  };\n}\n\n/**\n * Parse Voucher Code and PIN\n */\nfunction parseVoucherData(content) {\n  const voucherPatterns = [\n    /(?:voucher|gift\\s*card|code)\\s*:?\\s*([A-Z0-9]{8,16})/i,\n    /(?:your|the)\\s*voucher\\s*:?\\s*([A-Z0-9]{8,16})/i,\n    /code\\s*:?\\s*([A-Z0-9]{8,16})/i\n  ];\n  \n  const pinPatterns = [\n    /PIN\\s*:?\\s*(\\d{4,8})/i,\n    /pin\\s*:?\\s*(\\d{4,8})/i,\n    /secret\\s*:?\\s*(\\d{4,8})/i\n  ];\n  \n  let voucherCode = null;\n  let pin = null;\n  \n  for (const pattern of voucherPatterns) {\n    const match = content.match(pattern);\n    if (match && match[1]) {\n      voucherCode = match[1];\n      break;\n    }\n  }\n  \n  for (const pattern of pinPatterns) {\n    const match = content.match(pattern);\n    if (match && match[1]) {\n      pin = match[1];\n      break;\n    }\n  }\n  \n  if (voucherCode && pin) {\n    return {\n      success: true,\n      voucher_code: voucherCode,\n      voucher_pin: pin,\n      type: 'voucher_data',\n      confidence: 'high'\n    };\n  } else if (voucherCode || pin) {\n    return {\n      success: false,\n      partial: true,\n      voucher_code: voucherCode,\n      voucher_pin: pin,\n      error: 'Incomplete voucher data - missing ' + (voucherCode ? 'PIN' : 'voucher code'),\n      type: 'voucher_data'\n    };\n  }\n  \n  return {\n    success: false,\n    error: 'No voucher data found',\n    type: 'voucher_data',\n    content_preview: content.substring(0, 100)\n  };\n}\n\n// ===========================================\n// MAIN PROCESSING LOGIC\n// ===========================================\n\n/**\n * Determine content type and route to appropriate parser\n * FIXED: Payment OTP detection takes priority over voucher detection\n */\nfunction determineContentType(content) {\n  const lowerContent = content.toLowerCase();\n  \n  // Handle special control messages\n  if (content === '__GET_STATE__' || content === '__HEALTH_CHECK__') {\n    return 'status_check';\n  }\n  \n  // PRIORITY 1: Check for payment OTP indicators FIRST\n  // This prevents SafeKey messages with merchant names like \"VOUCHER PLATFORM\" \n  // from being incorrectly classified as voucher content\n  if (lowerContent.includes('safekey') || \n      lowerContent.includes('safe key') ||\n      (lowerContent.includes('otp') && (lowerContent.includes('card ending') || lowerContent.includes('inr') || lowerContent.includes('usd'))) ||\n      lowerContent.includes('payment') || \n      lowerContent.includes('transaction') || \n      lowerContent.includes('bank')) {\n    return 'payment_otp';\n  }\n  \n  // PRIORITY 2: Check for voucher indicators (now requires specific combinations)\n  // Make voucher detection more specific to avoid false positives\n  if ((lowerContent.includes('voucher') && (lowerContent.includes('code') || lowerContent.includes('pin'))) || \n      lowerContent.includes('gift card') || \n      (lowerContent.includes('code') && lowerContent.includes('pin') && !lowerContent.includes('otp'))) {\n    return 'voucher';\n  }\n  \n  // PRIORITY 3: Default to mobile OTP\n  return 'mobile_otp';\n}\n\n// ===========================================\n// MAIN EXECUTION\n// ===========================================\n\ntry {\n  const webhookData = $input.all()[0].json;\n  console.log('Received webhook data:', JSON.stringify(webhookData, null, 2));\n  \n  // Clear expired data first\n  const clearResult = clearExpiredData();\n  \n  // Extract content with improved logic for nested body structure\n  let content = '';\n  \n  // First check if body has a message field\n  if (webhookData.body && typeof webhookData.body === 'object' && webhookData.body.message) {\n    content = webhookData.body.message;\n  }\n  // Then check if body has a text field  \n  else if (webhookData.body && typeof webhookData.body === 'object' && webhookData.body.text) {\n    content = webhookData.body.text;\n  }\n  // Check direct message field\n  else if (webhookData.message) {\n    content = webhookData.message;\n  }\n  // Check direct text field\n  else if (webhookData.text) {\n    content = webhookData.text;\n  }\n  // Check content field\n  else if (webhookData.content) {\n    content = webhookData.content;\n  }\n  // Handle string body\n  else if (webhookData.body && typeof webhookData.body === 'string') {\n    content = webhookData.body;\n  }\n  // Last resort: stringify entire payload\n  else {\n    content = JSON.stringify(webhookData);\n  }\n  \n  console.log('Extracted content:', content);\n  \n  // Determine content type\n  const contentType = determineContentType(content);\n  console.log('Determined content type:', contentType);\n  \n  let parseResult;\n  let storageResult;\n  \n  // Handle status check requests\n  if (contentType === 'status_check') {\n    const currentGlobals = getGlobalStorage();\n    return [{\n      json: {\n        success: true,\n        content_type: 'status_check',\n        current_globals: currentGlobals,\n        data_validity: {\n          is_valid: isDataValid(),\n          expires_at: currentGlobals.expires_at,\n          last_updated: currentGlobals.last_updated\n        },\n        timestamp: getCurrentTimestamp(),\n        message: 'Status check successful'\n      }\n    }];\n  }\n  \n  // Route to appropriate parser\n  switch (contentType) {\n    case 'mobile_otp':\n      parseResult = parseMobileOTP(content);\n      if (parseResult.success) {\n        storageResult = saveToGlobals('mobile_otp', parseResult.otp, 'mobile_otp');\n      }\n      break;\n      \n    case 'payment_otp':\n      parseResult = parsePaymentOTP(content);\n      if (parseResult.success) {\n        storageResult = saveToGlobals('payment_otp', parseResult.otp, 'payment_otp');\n      }\n      break;\n      \n    case 'voucher':\n      parseResult = parseVoucherData(content);\n      if (parseResult.success) {\n        const voucherStorage = saveToGlobals('voucher_code', parseResult.voucher_code, 'voucher_code');\n        const pinStorage = saveToGlobals('voucher_pin', parseResult.voucher_pin, 'voucher_pin');\n        storageResult = {\n          voucher_code: voucherStorage,\n          voucher_pin: pinStorage\n        };\n      }\n      break;\n      \n    default:\n      parseResult = { success: false, error: 'Unknown content type' };\n  }\n  \n  // Get current global storage state\n  const currentGlobals = getGlobalStorage();\n  \n  // Return comprehensive response\n  return [{\n    json: {\n      success: parseResult.success,\n      content_type: contentType,\n      parse_result: parseResult,\n      storage_result: storageResult,\n      current_globals: currentGlobals,\n      data_validity: {\n        is_valid: isDataValid(),\n        expires_at: currentGlobals.expires_at,\n        last_updated: currentGlobals.last_updated\n      },\n      clear_result: clearResult,\n      timestamp: getCurrentTimestamp(),\n      message: parseResult.success ? \n        `Successfully got ${contentType}` : \n        `Failed to process ${contentType}: ${parseResult.error}`\n    }\n  }];\n  \n} catch (error) {\n  console.error('Error in OTP/Voucher parser:', error);\n  \n  return [{\n    json: {\n      success: false,\n      error: error.message,\n      stack: error.stack,\n      timestamp: getCurrentTimestamp(),\n      message: 'Internal parser error'\n    }\n  }];\n}"
+      },
+      "id": "00bf0fe7-39bf-40b3-8d46-0292a8bb93cb",
+      "name": "OTP/Voucher Parser & Storage",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [256, 336]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {\n  status: \"received\",\n  success: $node[\"OTP/Voucher Parser & Storage\"].json.success,\n  message: $node[\"OTP/Voucher Parser & Storage\"].json.message,\n  content_type: $node[\"OTP/Voucher Parser & Storage\"].json.content_type,\n  mobile_otp: $node[\"OTP/Voucher Parser & Storage\"].json.current_globals.mobile_otp,\n  payment_otp: $node[\"OTP/Voucher Parser & Storage\"].json.current_globals.payment_otp,\n  voucher_code: $node[\"OTP/Voucher Parser & Storage\"].json.current_globals.voucher_code,\n  voucher_pin: $node[\"OTP/Voucher Parser & Storage\"].json.current_globals.voucher_pin,\n  expires_at: $node[\"OTP/Voucher Parser & Storage\"].json.current_globals.expires_at,\n  timestamp: $now\n} }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [464, 336],
+      "id": "a4534eae-9296-4942-9aef-0c489fecb20a",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "language": "python",
+        "pythonCode": "# N8N Python Node - Voucher Claim Confirmation\n# This code should be placed in an N8N Python node\n\n# Access the input data from the previous node\ninput_data = items[0]['json']\n\n# Initialize result dictionary\nresult = {\n    'success': False,\n    'message': '',\n    'statusCode': None,\n    'value': None,\n    'voucher': input_data.get('voucher', {})\n}\n\n# Extract response data\nstatus_code = input_data.get('statusCode')\nstatus_message = input_data.get('statusMessage', 'No status message provided.')\ndata = input_data.get('data', {})\n\n# Update result with status code\nresult['statusCode'] = status_code\n\n# Process different status codes\nif status_code == 0:\n    # Successful voucher claim\n    value = data.get('value') if data else None\n    result['success'] = True\n    result['value'] = value\n    result['message'] = f\"Voucher claim successful! Amount credited: ₹{value if value is not None else 'Unknown'}\"\n    print(f\"✅ {result['message']}\")\n\nelif status_code == 7:\n    # Voucher already claimed\n    result['message'] = f\"Voucher already claimed: {status_message}\"\n    print(f\"⚠️ {result['message']}\")\n\nelse:\n    # Other error conditions\n    result['message'] = f\"Voucher claim failed: {status_message} (statusCode: {status_code})\"\n    print(f\"❌ {result['message']}\")\n\n# Return the result for the next node\nreturn [{'json': result}]\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1152, 320],
+      "id": "8afb73b1-572e-4107-b37e-0295bf2e0a54",
+      "name": "Code"
+    },
+    {
+      "parameters": {
+        "requestMethod": "PATCH",
+        "url": "={{ $env['SWIGGY_VOUCHER_CLAIM_URL'] }}",
+        "options": {},
+        "bodyParametersUi": {
+          "parameter": [
+            {
+              "name": "code",
+              "value": "={{ $json.parse_result.voucher_code }}"
+            },
+            {
+              "name": "secret",
+              "value": "={{ $json.storage_result.voucher_pin.value }}"
+            }
+          ]
+        },
+        "headerParametersUi": {
+          "parameter": [
+            {
+              "name": "token",
+              "value": "={{ $env['SWIGGY_TOKEN'] }}"
+            },
+            {
+              "name": "tid",
+              "value": "={{ $env['SWIGGY_TID'] }}"
+            },
+            {
+              "name": "deviceId",
+              "value": "={{ $env['SWIGGY_DEVICE_ID'] }}"
+            }
+          ]
+        }
+      },
+      "id": "6a30b8a5-3469-464a-9091-cd9e4f831247",
+      "name": "Claim Swiggy Voucher",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 1,
+      "position": [944, 320]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.content_type }}",
+              "value2": "voucher"
+            }
+          ]
+        }
+      },
+      "id": "49dc4b1b-d490-4d93-9750-eace9e110f00",
+      "name": "Check if Swiggy Voucher",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [672, 336]
+    },
+    {
+      "parameters": {
+        "content": "## Voucher Automation System\n\n### Playwright Automation\n* Runs for **Gold charge card** or **Members rewards card**\n* Polls n8n webhook for OTPs every 3 seconds\n* Handles mobile OTP + payment OTP (SafeKey)\n\n### SMS Processing Flow\n**iOS Shortcut** → **Webhook** → **Parse OTP/Voucher** → **Global State (40s TTL)**\n\n### Auto-Claim Feature\n**If Swiggy Voucher Detected** → **Auto-claim via Swiggy API**\n* Status 0: Successfully claimed ✅\n* Status 7: Already claimed ⚠️\n* Other: Error handling ❌\n\n### Supported Vouchers\n`Currently supports **Swiggy** vouchers only`\n\n### OTP Types Handled\n* **Mobile OTP**: Login verification\n* **Payment OTP**: SafeKey/bank verification  \n* **Voucher Data**: Code + PIN extraction\n\n### Global State TTL: 40 seconds",
+        "height": 640,
+        "width": 544
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [384, -320],
+      "typeVersion": 1,
+      "id": "5185ecb5-192c-4939-b585-21b43a46f1b8",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://playwright-service:3000/start",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [48, 80],
+      "id": "4e940e54-3987-4e6a-9348-b3cc31ee2023",
+      "name": "Main Orchestrator"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "OTP/Voucher Webhook": {
+      "main": [
+        [
+          {
+            "node": "OTP/Voucher Parser & Storage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OTP/Voucher Parser & Storage": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Respond to Webhook": {
+      "main": [
+        [
+          {
+            "node": "Check if Swiggy Voucher",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim Swiggy Voucher": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check if Swiggy Voucher": {
+      "main": [
+        [
+          {
+            "node": "Claim Swiggy Voucher",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "648e5434-5d7c-4dc5-8658-e74ff17323be",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "d81ce736e7b47e26b56c2798e3a8b24bbcb4a3081a7156feea1cdac4f44e0d7e"
+  },
+  "id": "GsyNhbFjsVVFQsmS",
+  "tags": []
+}

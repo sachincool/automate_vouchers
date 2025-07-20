@@ -1,0 +1,144 @@
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Playwright
+test-results/
+playwright-report/
+playwright/.cache/
+
+# Coverage
+coverage/
+.nyc_output/
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+tmp/
+
+# Credentials and sensitive data
+credentials.json
+secrets.json
+*.pem
+*.key
+*.cert
+
+# Screenshots and recordings
+screenshots/
+videos/
+recordings/
+
+# n8n
+.n8n/
+
+# Backup files
+*.bak
+*.backup
+
+# Security files
+security.json
+auth.json
+tokens.json
+*.token
+*.secret
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Cache files
+.cache/
+cache/
+*.cache
+
+# Runtime files
+*.pid
+*.sock
+*.lock
+
+# Configuration files with sensitive data
+config.json
+settings.json
+secrets.yaml
+config.yaml
+
+# API keys and tokens
+api_keys.txt
+tokens.txt
+keys.txt
+
+# Personal data
+personal_data/
+user_data/
+private/
+
+# Test files with sensitive data
+test_credentials.json
+test_secrets.json
+demo_credentials.json
