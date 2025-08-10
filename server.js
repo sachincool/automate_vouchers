@@ -1,6 +1,9 @@
 const express = require('express')
 const { chromium } = require('playwright')
 const axios = require('axios')
+const dotenv = require('dotenv')
+
+dotenv.config()
 
 const app = express()
 app.use(express.json())
@@ -9,6 +12,7 @@ const {
   MOBILE,
   EMAIL,
   CARD_CVV,
+  GOLD_CHARGE_CVV,
   N8N_BASE_URL,
   WEBHOOK_PATH = '/webhook/ios-sms',
 } = process.env
@@ -92,11 +96,19 @@ async function getOTPFromWebhook(otpType, timeoutMs = 120000) {
   throw new Error(`Timeout waiting for ${otpType} after ${timeoutMs / 1000}s`)
 }
 
-async function runAutomation() {
+async function runAutomation(options = {}) {
+  const goldCharge =
+    typeof options.goldCharge === 'boolean'
+      ? options.goldCharge
+      : String(GOLD_CHARGE).toLowerCase() === 'true'
   if (!MOBILE || !EMAIL || !CARD_CVV || !N8N_BASE_URL) {
     throw new Error('MOBILE, EMAIL, CARD_CVV, N8N_BASE_URL must be set in env')
   }
-
+  if (goldCharge) {
+    console.log('GOLD_CHARGE is true')
+  } else {
+    console.log('GOLD_CHARGE is false')
+  }
   console.log('Starting Playwright automation...')
 
   const browser = await chromium.launch({
@@ -114,23 +126,42 @@ async function runAutomation() {
 
   const context = await browser.newContext({
     viewport: { width: 1920, height: 1080 },
+    locale: 'en-IN',
+    timezoneId: process.env.TZ || 'Asia/Kolkata',
     userAgent:
-      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     extraHTTPHeaders: {
       'Accept-Language': 'en-US,en;q=0.9',
       Accept:
         'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
     },
+    ignoreHTTPSErrors: true,
+    serviceWorkers: 'block',
   })
 
   const page = await context.newPage()
 
   try {
     console.log('Navigating to Gyftr page...')
-    await page.goto(
-      'https://www.gyftr.com/amexrewardmultiplier/swiggy-gv-gift-vouchers',
-      { waitUntil: 'networkidle', timeout: 60000 }
-    )
+    const targetUrl =
+      'https://www.gyftr.com/amexrewardmultiplier/swiggy-gv-gift-vouchers'
+    // Block telemetry/analytics that may hold the network idle state
+    await context.route('**/*', (route) => {
+      const url = route.request().url()
+      if (
+        /google-analytics|analytics\.google|googletagmanager|google\.com\/ccm\/collect|doubleclick\.net|hotjar|youtube\.com\/embed/i.test(
+          url
+        )
+      ) {
+        return route.abort()
+      }
+      return route.continue()
+    })
+
+    await page.goto(targetUrl, {
+      waitUntil: 'domcontentloaded',
+      timeout: 60000,
+    })
 
     console.log('Waiting for page to load completely...')
     await page.waitForLoadState('domcontentloaded')
@@ -139,7 +170,13 @@ async function runAutomation() {
     console.log('Clicking ADD button...')
     const addButtons = await page.getByRole('button', { name: 'ADD' }).all()
     if (addButtons.length >= 4) {
-      await addButtons[3].click()
+      if (goldCharge) {
+        console.log('Selecting GOLD_CHARGE amount (index 2)')
+        await addButtons[2].click()
+      } else {
+        console.log('Selecting MEMBERSHIP_REWARDS amount (index 3)')
+        await addButtons[3].click()
+      }
     } else {
       await page.getByRole('button', { name: 'ADD' }).first().click()
     }
@@ -220,10 +257,20 @@ async function runAutomation() {
     await page.waitForLoadState('networkidle')
 
     console.log('Selecting card...')
-    await page.locator('[id="1000075"]').click()
+    if (goldCharge) {
+      console.log('Choosing GOLD_CHARGE card (id 1000105)')
+      await page.locator('[id="1000105"]').click()
+    } else {
+      console.log('Choosing MEMBERSHIP_REWARDS card (id 1000075)')
+      await page.locator('[id="1000075"]').click()
+    }
 
     console.log('Filling CVV...')
-    await page.getByRole('textbox', { name: 'C V V' }).fill(CARD_CVV)
+    if (goldCharge) {
+      await page.getByRole('textbox', { name: 'C V V' }).fill(GOLD_CHARGE_CVV)
+    } else {
+      await page.getByRole('textbox', { name: 'C V V' }).fill(CARD_CVV)
+    }
 
     console.log('Clicking Proceed to Pay...')
     await page.getByText('Proceed to Pay').click()
@@ -470,20 +517,35 @@ async function runAutomation() {
   } catch (error) {
     console.error('Error during automation:', error.message)
     // Take a screenshot for debugging
-    await page.screenshot({ path: 'error-screenshot.png', fullPage: true })
+    try {
+      await page.screenshot({ path: 'error-screenshot.png', fullPage: true })
+    } catch {}
     throw error
   } finally {
     await browser.close()
   }
 }
 
+let isRunning = false
 app.post('/start', async (req, res) => {
+  if (isRunning) {
+    return res
+      .status(409)
+      .json({ success: false, message: 'Automation already running' })
+  }
+  isRunning = true
+  const goldChargeFlag =
+    typeof req.body?.goldCharge === 'boolean'
+      ? req.body.goldCharge
+      : String(req.body?.goldCharge || '').toLowerCase() === 'true'
   try {
-    await runAutomation()
+    await runAutomation({ goldCharge: goldChargeFlag })
     res.json({ success: true, message: 'Automation completed successfully' })
   } catch (error) {
     console.error(error)
     res.status(500).json({ success: false, message: error.message })
+  } finally {
+    isRunning = false
   }
 })
 

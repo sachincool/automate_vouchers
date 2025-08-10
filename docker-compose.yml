@@ -1,0 +1,14 @@
+version: '3.9'
+
+services:
+  playwright-service:
+    image: mcr.microsoft.com/playwright:v1.54.0-noble
+    working_dir: /playwright
+    command: ['bash', '-lc', 'npm ci --omit=dev && node server.js']
+    ports:
+      - '3000:3000'
+    volumes:
+      - ./:/playwright
+    env_file: .env
+    restart: always
+    shm_size: '1gb'
