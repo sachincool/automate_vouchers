@@ -1,10 +1,13 @@
 {
   "name": "automate-vouchers",
   "version": "1.0.0",
-  "description": "Automation for buying and claiming Swiggy vouchers from AmEx Gifter Portal with n8n webhook integration",
-  "main": "index.js",
+  "description": "Automation for buying and claiming Swiggy vouchers from AmEx Gyftr Portal with n8n webhook integration",
+  "main": "server.js",
   "scripts": {
-    "start": "node gyftr_automate.js"
+    "start": "node gyftr_automate.js",
+    "service": "node server.js",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down"
   },
   "dependencies": {
     "axios": "^1.6.0",
@@ -25,6 +28,17 @@
     "webhook",
     "otp"
   ],
-  "author": "",
-  "license": "ISC"
+  "author": "Harshit Luthra",
+  "license": "BSD-2-Clause",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bluebox/automate_vouchers"
+  },
+  "bugs": {
+    "url": "https://github.com/bluebox/automate_vouchers/issues"
+  },
+  "homepage": "https://github.com/bluebox/automate_vouchers#readme",
+  "engines": {
+    "node": ">=16"
+  }
 }

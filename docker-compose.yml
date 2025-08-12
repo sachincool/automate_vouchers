@@ -4,7 +4,7 @@ services:
   playwright-service:
     image: mcr.microsoft.com/playwright:v1.54.0-noble
     working_dir: /playwright
-    command: ['bash', '-lc', 'npm ci --omit=dev && node server.js']
+    command: ['bash', '-lc', 'npm install --omit=dev && node server.js']
     ports:
       - '3000:3000'
     volumes:

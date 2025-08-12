@@ -93,6 +93,11 @@ screenshots/
 videos/
 recordings/
 
+# Generated screenshots (root)
+final-result.png
+error-screenshot.png
+safekey-timeout.png
+
 # n8n
 .n8n/
 

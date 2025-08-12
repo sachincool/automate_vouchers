@@ -10,7 +10,7 @@ require('dotenv').config()
 const MOBILE = process.env.MOBILE
 const EMAIL = process.env.EMAIL
 const CARD_CVV = process.env.CARD_CVV
-const N8N_BASE_URL = process.env.N8N_BASE_URL || 'https://n8n.harshit.cloud'
+const N8N_BASE_URL = process.env.N8N_BASE_URL || 'http://localhost:5678'
 const WEBHOOK_PATH = process.env.WEBHOOK_PATH || '/webhook/ios-sms'
 
 if (!MOBILE || !EMAIL || !CARD_CVV) {

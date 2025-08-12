@@ -52,7 +52,7 @@ cd automate_vouchers
 npm install
 
 # Create environment file
-cp .env.example .env
+cp example.env .env
 ```
 
 ### 2. Environment Variables
@@ -97,9 +97,10 @@ SWIGGY_VOUCHER_CLAIM_URL=https://chkout.swiggy.com/swiggymoney/voucher/claim
 3. Configure:
    - **URL**: `https://your-n8n-instance.com/webhook/ios-sms`
    - **Method**: POST
-   - **Request Headers**: 
+    - **Request Headers**:
      - `Content-Type`: `application/json`
    - **Request Body**: JSON
+
      ```json
      {
        "text": "{{Shortcut Input}}"
@@ -170,6 +171,7 @@ node gyftr_automate.js
 ### OTP Polling Logic
 
 The script polls the n8n webhook every 3 seconds for:
+
 - **Mobile OTP**: For login verification
 - **Payment OTP**: For SafeKey/bank verification
 - **Voucher Data**: For automatic claiming
@@ -179,18 +181,23 @@ The script polls the n8n webhook every 3 seconds for:
 ### Automatic Claiming
 
 The n8n workflow automatically:
+
 1. **Detects Swiggy Vouchers**: Parses voucher codes and PINs
 2. **Claims Automatically**: Sends PATCH request to Swiggy API
-3. **Handles Responses**: 
-   - Status 0: Successfully claimed
-   - Status 7: Already claimed
-   - Other: Error handling
+3. **Handles Responses**:
+
+- Status 0: Successfully claimed
+- Status 7: Already claimed
+- Other: Error handling
 
 ### Manual Claiming
 
 If you prefer manual claiming:
 
 ```bash
+# Install Python dependencies
+pip install -r requirements.txt
+
 # Run the Python script
 python voucher_claim.py
 
@@ -225,6 +232,7 @@ python voucher_claim.py
 ### Logs
 
 The system provides detailed logging:
+
 - ✅ Success operations
 - ⚠️ Warnings and retries
 - ❌ Errors with stack traces
@@ -311,6 +319,7 @@ node -e "require('dotenv').config(); console.log(process.env)"
 ### n8n Workflow (`n8n-otp-voucher-workflow.json`)
 
 Contains the complete workflow with:
+
 - Webhook endpoint configuration
 - OTP/Voucher parsing logic
 - Swiggy voucher claiming
@@ -319,6 +328,7 @@ Contains the complete workflow with:
 ### Playwright Script (`gyftr_automate.js`)
 
 Main automation script with:
+
 - Browser automation logic
 - Webhook polling
 - Error handling
@@ -327,6 +337,7 @@ Main automation script with:
 ### Python Script (`voucher_claim.py`)
 
 Manual voucher claiming with:
+
 - Swiggy API integration
 - Response parsing
 - Error handling
@@ -341,11 +352,12 @@ Manual voucher claiming with:
 
 ## 📄 License
 
-This project is licensed under the ISC License.
+This project is licensed under the BSD 2-Clause License.
 
 ## 🆘 Support
 
 For issues and questions:
+
 1. Check the troubleshooting section
 2. Review the logs for error details
 3. Test individual components
@@ -353,4 +365,4 @@ For issues and questions:
 
 ---
 
-**Note**: This automation system is for educational purposes. Ensure compliance with AmEx and Swiggy terms of service before use in production environments. 
+**Note**: This automation system is for educational purposes. Ensure compliance with AmEx and Swiggy terms of service before use in production environments.

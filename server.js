@@ -13,6 +13,7 @@ const {
   EMAIL,
   CARD_CVV,
   GOLD_CHARGE_CVV,
+  GOLD_CHARGE,
   N8N_BASE_URL,
   WEBHOOK_PATH = '/webhook/ios-sms',
 } = process.env
