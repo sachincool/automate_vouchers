@@ -2,7 +2,7 @@
 
 Thanks for your interest in contributing! A few quick guidelines:
 
-- Fork the repo and create a feature branch from `master`
+- Fork the repo and create a feature branch from `main`
 - Make focused edits with clear commit messages
 - Keep code readable and follow existing style
 - Do not include secrets, tokens, or personal data in commits or examples
