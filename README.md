@@ -2,6 +2,8 @@
 
 A comprehensive automation system for buying and claiming Swiggy vouchers from AmEx Gyftr Portal using n8n webhooks, Playwright automation, and iOS shortcuts.
 
+![System Overview](assets/image.png)
+
 ## 🏗️ System Architecture
 
 ```mermaid
@@ -85,27 +87,41 @@ SWIGGY_VOUCHER_CLAIM_URL=https://chkout.swiggy.com/swiggymoney/voucher/claim
 
 1. Tap **Add Action**
 2. Search for "Messages" and select **Get Messages**
+
+-
+
 3. Configure:
-   - **Messages**: All Messages
-   - **Limit**: 1
-   - **Filter**: From [your SMS sender]
+
+- **Messages**: All Messages
+- **Limit**: 1
+- **Filter**: From [your SMS sender]
 
 ### Step 3: Add HTTP Request
 
 1. Tap **Add Action** again
 2. Search for "Get Contents of URL"
+
+-
+
 3. Configure:
-   - **URL**: `https://your-n8n-instance.com/webhook/ios-sms`
-   - **Method**: POST
-    - **Request Headers**:
-     - `Content-Type`: `application/json`
-   - **Request Body**: JSON
+
+- **URL**: `https://your-n8n-instance.com/webhook/ios-sms`
+- **Method**: POST
+- **Request Headers**:
+  - `Content-Type`: `application/json`
+- **Request Body**: JSON
 
      ```json
      {
        "text": "{{Shortcut Input}}"
      }
      ```
+
+#### Visual guide
+
+![Setting up the iOS Shortcut (1)](assets/setting_up_shortcut.png)
+
+![Setting up the iOS Shortcut (2)](assets/setting_up_shortcut_2.png)
 
 ### Step 4: Add Automation Trigger
 
