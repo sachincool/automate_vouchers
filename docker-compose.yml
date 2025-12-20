@@ -16,10 +16,18 @@ services:
       - WEBHOOK_PATH=${WEBHOOK_PATH:-/webhook/ios-sms}
       - TZ=${TZ:-Asia/Kolkata}
       - NODE_ENV=production
-    expose:
+    ports:
       - 3000
     volumes:
       - playwright_data:/app/screenshots
+    networks:
+      - dokploy-network
+    labels:
+      - 'traefik.enable=true'
+      - 'traefik.http.routers.playwright-voucher-automation.rule=Host(`${PLAYWRIGHT_DOMAIN:-playwright.yourdomain.com}`)'
+      - 'traefik.http.routers.playwright-voucher-automation.entrypoints=websecure'
+      - 'traefik.http.routers.playwright-voucher-automation.tls.certResolver=letsencrypt'
+      - 'traefik.http.services.playwright-voucher-automation.loadbalancer.server.port=3000'
 
   n8n:
     image: docker.n8n.io/n8nio/n8n:latest
@@ -37,10 +45,22 @@ services:
       - SWIGGY_DEVICE_ID=${SWIGGY_DEVICE_ID}
       - SWIGGY_TID=${SWIGGY_TID}
       - SWIGGY_TOKEN=${SWIGGY_TOKEN}
-    expose:
+    ports:
       - 5678
     volumes:
       - n8n_data:/home/node/.n8n
+    networks:
+      - dokploy-network
+    labels:
+      - 'traefik.enable=true'
+      - 'traefik.http.routers.n8n-voucher-automation.rule=Host(`${N8N_DOMAIN:-n8n.harshit.cloud}`)'
+      - 'traefik.http.routers.n8n-voucher-automation.entrypoints=websecure'
+      - 'traefik.http.routers.n8n-voucher-automation.tls.certResolver=letsencrypt'
+      - 'traefik.http.services.n8n-voucher-automation.loadbalancer.server.port=5678'
+
+networks:
+  dokploy-network:
+    external: true
 
 volumes:
   n8n_data:
