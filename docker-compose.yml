@@ -1,25 +1,19 @@
 services:
-  # Playwright Automation Service
   playwright-service:
     build:
       context: .
       dockerfile: Dockerfile.playwright
     restart: always
-    shm_size: '1gb'
+    shm_size: 1gb
     env_file: .env
     environment:
-      # AmEx Gyftr Credentials (from .env)
       - MOBILE=${MOBILE}
       - EMAIL=${EMAIL}
       - CARD_CVV=${CARD_CVV}
       - GOLD_CHARGE_CVV=${GOLD_CHARGE_CVV}
       - GOLD_CHARGE=${GOLD_CHARGE:-false}
-
-      # n8n Webhook Configuration
       - N8N_BASE_URL=http://n8n:5678
       - WEBHOOK_PATH=${WEBHOOK_PATH:-/webhook/ios-sms}
-
-      # Runtime
       - TZ=${TZ:-Asia/Kolkata}
       - NODE_ENV=production
     expose:
@@ -36,13 +30,11 @@ services:
       retries: 3
       start_period: 40s
 
-  # n8n Workflow Engine
   n8n:
     image: docker.n8n.io/n8nio/n8n:latest
     restart: always
     env_file: .env
     environment:
-      # Core n8n Configuration
       - N8N_HOST=${N8N_HOST}
       - N8N_PORT=5678
       - N8N_PROTOCOL=${N8N_PROTOCOL:-https}
@@ -50,8 +42,6 @@ services:
       - N8N_SECURE_COOKIE=${N8N_SECURE_COOKIE:-true}
       - WEBHOOK_URL=${N8N_BASE_URL}
       - GENERIC_TIMEZONE=${GENERIC_TIMEZONE:-Asia/Kolkata}
-
-      # Swiggy Voucher Auto-Claim Configuration (from .env)
       - SWIGGY_VOUCHER_CLAIM_URL=${SWIGGY_VOUCHER_CLAIM_URL}
       - SWIGGY_DEVICE_ID=${SWIGGY_DEVICE_ID}
       - SWIGGY_TID=${SWIGGY_TID}
