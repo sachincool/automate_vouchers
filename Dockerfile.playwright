@@ -14,7 +14,7 @@ COPY server.js ./
 COPY gyftr_automate.js ./
 
 # Install Playwright browsers
-RUN npx playwright install chromium --with-deps
+RUN npm exec playwright install chromium --with-deps
 
 # Create directory for screenshots
 RUN mkdir -p /app/screenshots
