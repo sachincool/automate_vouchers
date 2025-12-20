@@ -30,7 +30,7 @@ services:
     volumes:
       - playwright_data:/app/screenshots
     networks:
-      - default
+      - dokploy-network
     healthcheck:
       test:
         ['CMD-SHELL', 'wget --spider -q http://localhost:3000/health || exit 1']
@@ -65,7 +65,7 @@ services:
     volumes:
       - n8n_data:/home/node/.n8n
     networks:
-      - default
+      - dokploy-network
     depends_on:
       playwright-service:
         condition: service_healthy
@@ -79,6 +79,10 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+
+networks:
+  dokploy-network:
+    external: true
 
 volumes:
   n8n_data:
