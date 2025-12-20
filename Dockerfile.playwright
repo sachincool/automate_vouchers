@@ -13,8 +13,8 @@ RUN npm install --omit=dev --no-package-lock
 COPY server.js ./
 COPY gyftr_automate.js ./
 
-# Install Playwright browsers
-RUN npm exec playwright install chromium --with-deps
+# Install Playwright browsers using node to execute the CLI
+RUN node ./node_modules/playwright/cli.js install chromium --with-deps
 
 # Create directory for screenshots
 RUN mkdir -p /app/screenshots
