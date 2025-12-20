@@ -25,10 +25,12 @@ services:
       # Runtime
       - TZ=${TZ:-Asia/Kolkata}
       - NODE_ENV=production
+    ports:
+      - 3000
     volumes:
       - playwright_data:/app/screenshots
     networks:
-      - voucher-network
+      - default
     healthcheck:
       test:
         ['CMD-SHELL', 'wget --spider -q http://localhost:3000/health || exit 1']
@@ -36,9 +38,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-    # Optional: Expose for debugging (can be removed in production)
-    ports:
-      - '${PLAYWRIGHT_HOST_PORT:-3010}:3000'
 
   # n8n Workflow Engine
   n8n:
@@ -49,11 +48,10 @@ services:
     environment:
       # Core n8n Configuration
       - N8N_HOST=${N8N_HOST}
-      - N8N_PORT=${N8N_PORT:-5678}
-      - N8N_PROTOCOL=${N8N_PROTOCOL:-http}
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=${N8N_PROTOCOL:-https}
       - NODE_ENV=production
-      - N8N_SECURE_COOKIE=${N8N_SECURE_COOKIE:-false}
-      - N8N_PUBLIC_URL=${N8N_BASE_URL}
+      - N8N_SECURE_COOKIE=${N8N_SECURE_COOKIE:-true}
       - WEBHOOK_URL=${N8N_BASE_URL}
       - GENERIC_TIMEZONE=${GENERIC_TIMEZONE:-Asia/Kolkata}
 
@@ -62,10 +60,12 @@ services:
       - SWIGGY_DEVICE_ID=${SWIGGY_DEVICE_ID}
       - SWIGGY_TID=${SWIGGY_TID}
       - SWIGGY_TOKEN=${SWIGGY_TOKEN}
+    ports:
+      - 5678
     volumes:
       - n8n_data:/home/node/.n8n
     networks:
-      - voucher-network
+      - default
     depends_on:
       playwright-service:
         condition: service_healthy
@@ -79,12 +79,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-    ports:
-      - '${N8N_PORT:-5678}:5678'
-
-networks:
-  voucher-network:
-    driver: bridge
 
 volumes:
   n8n_data:
