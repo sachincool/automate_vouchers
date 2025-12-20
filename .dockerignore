@@ -1,0 +1,68 @@
+# Node
+node_modules
+npm-debug.log
+yarn-error.log
+
+# Environment
+.env
+.env.*
+!example.env
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Documentation
+*.md
+!README.md
+docs/
+
+# Assets
+assets/
+*.mp4
+*.png
+*.jpg
+*.jpeg
+*.gif
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+env/
+*.egg-info/
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Misc
+*.log
+.DS_Store
+Thumbs.db
+final-result.png
+error-screenshot.png
+safekey-timeout.png
+
+# Build artifacts
+dist/
+build/
+*.tar.gz
+
+
+
+
+

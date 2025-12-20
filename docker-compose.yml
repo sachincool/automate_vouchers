@@ -1,14 +1,93 @@
 version: '3.9'
 
 services:
+  # Playwright Automation Service
   playwright-service:
-    image: mcr.microsoft.com/playwright:v1.54.0-noble
-    working_dir: /playwright
-    command: ['bash', '-lc', 'npm install --omit=dev && node server.js']
-    ports:
-      - '3000:3000'
-    volumes:
-      - ./:/playwright
-    env_file: .env
+    build:
+      context: .
+      dockerfile: Dockerfile.playwright
+    container_name: playwright-service
     restart: always
     shm_size: '1gb'
+    env_file: .env
+    environment:
+      # AmEx Gyftr Credentials (from .env)
+      - MOBILE=${MOBILE}
+      - EMAIL=${EMAIL}
+      - CARD_CVV=${CARD_CVV}
+      - GOLD_CHARGE_CVV=${GOLD_CHARGE_CVV}
+      - GOLD_CHARGE=${GOLD_CHARGE:-false}
+
+      # n8n Webhook Configuration
+      - N8N_BASE_URL=http://n8n:5678
+      - WEBHOOK_PATH=${WEBHOOK_PATH:-/webhook/ios-sms}
+
+      # Runtime
+      - TZ=${TZ:-Asia/Kolkata}
+      - NODE_ENV=production
+    volumes:
+      - playwright_data:/app/screenshots
+    networks:
+      - voucher-network
+    healthcheck:
+      test:
+        ['CMD-SHELL', 'wget --spider -q http://localhost:3000/health || exit 1']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    # Optional: Expose for debugging (can be removed in production)
+    ports:
+      - '${PLAYWRIGHT_HOST_PORT:-3010}:3000'
+
+  # n8n Workflow Engine
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:1.123.4
+    container_name: n8n
+    restart: always
+    env_file: .env
+    environment:
+      # Core n8n Configuration
+      - N8N_HOST=${N8N_HOST}
+      - N8N_PORT=${N8N_PORT:-5678}
+      - N8N_PROTOCOL=${N8N_PROTOCOL:-http}
+      - NODE_ENV=production
+      - N8N_SECURE_COOKIE=${N8N_SECURE_COOKIE:-false}
+      - N8N_PUBLIC_URL=${N8N_BASE_URL}
+      - WEBHOOK_URL=${N8N_BASE_URL}
+      - GENERIC_TIMEZONE=${GENERIC_TIMEZONE:-Asia/Kolkata}
+
+      # Swiggy Voucher Auto-Claim Configuration (from .env)
+      - SWIGGY_VOUCHER_CLAIM_URL=${SWIGGY_VOUCHER_CLAIM_URL}
+      - SWIGGY_DEVICE_ID=${SWIGGY_DEVICE_ID}
+      - SWIGGY_TID=${SWIGGY_TID}
+      - SWIGGY_TOKEN=${SWIGGY_TOKEN}
+    volumes:
+      - n8n_data:/home/node/.n8n
+    networks:
+      - voucher-network
+    depends_on:
+      playwright-service:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'wget --spider -q http://localhost:5678/healthz || exit 1',
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    ports:
+      - '${N8N_PORT:-5678}:5678'
+
+networks:
+  voucher-network:
+    driver: bridge
+
+volumes:
+  n8n_data:
+    driver: local
+  playwright_data:
+    driver: local

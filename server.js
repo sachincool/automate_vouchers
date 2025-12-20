@@ -528,6 +528,27 @@ async function runAutomation(options = {}) {
 }
 
 let isRunning = false
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({ 
+    status: 'healthy', 
+    service: 'playwright-automation',
+    isRunning: isRunning,
+    timestamp: new Date().toISOString()
+  })
+})
+
+// Status endpoint
+app.get('/status', (req, res) => {
+  res.json({ 
+    service: 'Playwright Automation Service',
+    status: isRunning ? 'running' : 'idle',
+    isRunning: isRunning,
+    timestamp: new Date().toISOString()
+  })
+})
+
 app.post('/start', async (req, res) => {
   if (isRunning) {
     return res
