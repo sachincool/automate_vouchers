@@ -38,7 +38,7 @@ services:
       start_period: 40s
     # Optional: Expose for debugging (can be removed in production)
     ports:
-      - '${PLAYWRIGHT_HOST_PORT:-3010}:3000'
+      - '${PLAYWRIGHT_HOST_PORT:-3010}'
 
   # n8n Workflow Engine
   n8n:
@@ -80,7 +80,7 @@ services:
       retries: 3
       start_period: 40s
     ports:
-      - '${N8N_PORT:-5678}:5678'
+      - '${N8N_PORT:-5678}'
 
 networks:
   voucher-network:
