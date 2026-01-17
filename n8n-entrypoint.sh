@@ -10,7 +10,7 @@ if [ -f /workflows/n8n-otp-voucher-workflow.json ]; then
   # Run import in background after n8n starts
   (
     sleep 10  # Wait for n8n to fully initialize
-    n8n import:workflow --input=/workflows/n8n-otp-voucher-workflow.json --separate || echo "Workflow import completed (may already exist)"
+    n8n import:workflow --input=/workflows/n8n-otp-voucher-workflow.json || echo "Workflow import completed (may already exist)"
     echo "Workflow import process finished"
   ) &
 fi
