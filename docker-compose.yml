@@ -27,6 +27,7 @@ services:
     image: docker.n8n.io/n8nio/n8n:latest
     restart: always
     env_file: .env
+    entrypoint: ["/bin/sh", "/workflows/n8n-entrypoint.sh"]
     environment:
       - N8N_HOST=${N8N_HOST}
       - N8N_PORT=5678
@@ -45,6 +46,8 @@ services:
       - 5678
     volumes:
       - n8n_data:/home/node/.n8n
+      - ./n8n-otp-voucher-workflow.json:/workflows/n8n-otp-voucher-workflow.json:ro
+      - ./n8n-entrypoint.sh:/workflows/n8n-entrypoint.sh:ro
     networks:
       - dokploy-network
 
