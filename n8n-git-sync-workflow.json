@@ -1,0 +1,117 @@
+{
+  "name": "Git Sync - Auto Update Workflows",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "git-sync",
+        "options": {}
+      },
+      "id": "webhook-git-sync",
+      "name": "GitHub Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "webhookId": "git-sync-webhook"
+    },
+    {
+      "parameters": {
+        "url": "https://raw.githubusercontent.com/sachincool/automate_vouchers/master/n8n-otp-voucher-workflow.json",
+        "options": {}
+      },
+      "id": "fetch-workflow-json",
+      "name": "Fetch Workflow JSON",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=http://localhost:5678/api/v1/workflows/{{ $vars.MAIN_WORKFLOW_ID }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "update-workflow",
+      "name": "Update Workflow via API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [650, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "n8n-api-key",
+          "name": "n8n API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Git Sync Workflow\n\n### Setup Required:\n1. **Create n8n API Key**: Settings → n8n API → Add API Key\n2. **Create HTTP Header Auth credential**:\n   - Name: `n8n API Key`\n   - Header Name: `X-N8N-API-KEY`\n   - Header Value: `<your-api-key>`\n3. **Create Variable**: Settings → Variables\n   - Name: `MAIN_WORKFLOW_ID`\n   - Value: `<ID of OTP & Voucher Handler workflow>`\n4. **Setup GitHub Webhook**:\n   - URL: `https://n8n.harshit.cloud/webhook/git-sync`\n   - Events: Push\n\n### How it works:\n1. GitHub sends push event\n2. Fetches latest workflow JSON from repo\n3. Updates workflow via n8n API",
+        "height": 440,
+        "width": 400
+      },
+      "id": "sticky-instructions",
+      "name": "Setup Instructions",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, -160]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"success\": true, \"message\": \"Workflow updated\", \"workflowId\": $vars.MAIN_WORKFLOW_ID } }}",
+        "options": {}
+      },
+      "id": "respond-success",
+      "name": "Respond Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [850, 300]
+    }
+  ],
+  "connections": {
+    "GitHub Webhook": {
+      "main": [
+        [
+          {
+            "node": "Fetch Workflow JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Workflow JSON": {
+      "main": [
+        [
+          {
+            "node": "Update Workflow via API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Workflow via API": {
+      "main": [
+        [
+          {
+            "node": "Respond Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "tags": []
+}
