@@ -24,10 +24,10 @@ services:
       - dokploy-network
 
   n8n:
-    image: docker.n8n.io/n8nio/n8n:latest
+    image: docker.n8n.io/n8nio/n8n:2.3.4
     restart: always
     env_file: .env
-    entrypoint: ["/bin/sh", "/workflows/n8n-entrypoint.sh"]
+    entrypoint: ['/bin/sh', '/workflows/n8n-entrypoint.sh']
     environment:
       - N8N_HOST=${N8N_HOST}
       - N8N_PORT=5678
