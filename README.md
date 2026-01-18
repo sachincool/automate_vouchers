@@ -37,7 +37,7 @@ cp example.env .env
 
 Set the following in `.env` (see `example.env` for all options):
 
-- MOBILE, EMAIL, CARD_CVV, GOLD_CHARGE_CVV, GOLD_CHARGE
+- MOBILE, EMAIL, MEMBERSHIP_CARD_CVV, GOLDCHARGE_CARD_CVV, USE_GOLDCHARGE_CARD
 - N8N_BASE_URL, WEBHOOK_PATH
 - Optional for auto-claim: SWIGGY_VOUCHER_CLAIM_URL, SWIGGY_DEVICE_ID, SWIGGY_TID, SWIGGY_TOKEN
 

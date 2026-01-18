@@ -41,9 +41,9 @@ In Dokploy, add the following environment variables:
 ```
 MOBILE=your_mobile_number
 EMAIL=your_email@example.com
-CARD_CVV=123
-GOLD_CHARGE_CVV=456
-GOLD_CHARGE=false
+MEMBERSHIP_CARD_CVV=123
+GOLDCHARGE_CARD_CVV=456
+USE_GOLDCHARGE_CARD=false
 ```
 
 #### n8n Configuration

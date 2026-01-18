@@ -9,9 +9,9 @@ services:
     environment:
       - MOBILE=${MOBILE}
       - EMAIL=${EMAIL}
-      - CARD_CVV=${CARD_CVV}
-      - GOLD_CHARGE_CVV=${GOLD_CHARGE_CVV}
-      - GOLD_CHARGE=${GOLD_CHARGE:-false}
+      - MEMBERSHIP_CARD_CVV=${MEMBERSHIP_CARD_CVV}
+      - GOLDCHARGE_CARD_CVV=${GOLDCHARGE_CARD_CVV}
+      - USE_GOLDCHARGE_CARD=${USE_GOLDCHARGE_CARD:-false}
       - N8N_BASE_URL=http://n8n:5678
       - WEBHOOK_PATH=${WEBHOOK_PATH:-/webhook/ios-sms}
       - TZ=${TZ:-Asia/Kolkata}
@@ -38,7 +38,7 @@ services:
       - GENERIC_TIMEZONE=${GENERIC_TIMEZONE:-Asia/Kolkata}
       - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
       - N8N_SOURCECONTROL_ENABLED=true
-      - GOLD_CHARGE=${GOLD_CHARGE:-false}
+      - USE_GOLDCHARGE_CARD=${USE_GOLDCHARGE_CARD:-false}
       - SWIGGY_VOUCHER_CLAIM_URL=${SWIGGY_VOUCHER_CLAIM_URL}
       - SWIGGY_DEVICE_ID=${SWIGGY_DEVICE_ID}
       - SWIGGY_TID=${SWIGGY_TID}

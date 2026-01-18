@@ -122,16 +122,10 @@
       "parameters": {
         "method": "POST",
         "url": "http://playwright-service:3000/start",
-        "sendBody": true,
-        "bodyParameters": {
-          "parameters": [
-            {
-              "name": "goldCharge",
-              "value": "={{ $env['GOLD_CHARGE'] === 'true' }}"
-            }
-          ]
-        },
-        "options": {}
+        "sendBody": false,
+        "options": {
+          "timeout": 300000
+        }
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,

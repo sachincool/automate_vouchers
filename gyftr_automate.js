@@ -9,13 +9,21 @@ require('dotenv').config()
 // Read environment variables
 const MOBILE = process.env.MOBILE
 const EMAIL = process.env.EMAIL
-const CARD_CVV = process.env.CARD_CVV
+const MEMBERSHIP_CARD_CVV = process.env.MEMBERSHIP_CARD_CVV
+const GOLDCHARGE_CARD_CVV = process.env.GOLDCHARGE_CARD_CVV
+const USE_GOLDCHARGE_CARD = String(process.env.USE_GOLDCHARGE_CARD || '').toLowerCase() === 'true'
 const N8N_BASE_URL = process.env.N8N_BASE_URL || 'http://localhost:5678'
 const WEBHOOK_PATH = process.env.WEBHOOK_PATH || '/webhook/ios-sms'
 
-if (!MOBILE || !EMAIL || !CARD_CVV) {
+// DEBUG: Log card selection at startup
+console.log('=== CARD CONFIGURATION ===')
+console.log(`USE_GOLDCHARGE_CARD: ${USE_GOLDCHARGE_CARD}`)
+console.log(`*** WILL USE: ${USE_GOLDCHARGE_CARD ? 'GOLDCHARGE CARD (₹1,000)' : 'MEMBERSHIP CARD (₹1,500)'} ***`)
+console.log('==========================\n')
+
+if (!MOBILE || !EMAIL || !MEMBERSHIP_CARD_CVV) {
   console.error(
-    '❌ Please set MOBILE, EMAIL, and CARD_CVV in your environment variables.'
+    '❌ Please set MOBILE, EMAIL, and MEMBERSHIP_CARD_CVV in your environment variables.'
   )
   process.exit(1)
 }
@@ -221,7 +229,7 @@ function logWithTimestamp(message, level = 'info') {
 
     logWithTimestamp('✅ Webhook health check passed')
 
-    const browser = await chromium.launch({ headless: false })
+    const browser = await chromium.launch({ headless: true })
     const context = await browser.newContext()
     const page = await context.newPage()
 
@@ -233,8 +241,63 @@ function logWithTimestamp(message, level = 'info') {
 
     // Add voucher to cart
     logWithTimestamp('🛒 Adding voucher to cart...')
-    // await page.getByRole('button', { name: 'ADD' }).nth(2).click(); //1000 for Gold charge card
-    await page.getByRole('button', { name: 'ADD' }).nth(3).click() //1500 for Membership rewards card
+    
+    // Wait for ADD buttons to appear (with timeout)
+    console.log('Waiting for ADD buttons...')
+    try {
+      await page.getByRole('button', { name: 'ADD' }).first().waitFor({ state: 'visible', timeout: 15000 })
+      console.log('ADD buttons are visible')
+    } catch (e) {
+      console.log('Warning: Timeout waiting for ADD buttons, proceeding anyway...')
+    }
+    
+    // Get all ADD buttons
+    const allButtons = await page.getByRole('button', { name: 'ADD' }).all()
+    console.log(`Found ${allButtons.length} ADD buttons`)
+    
+    // Target amount: 1000 for goldcharge, 1500 for membership
+    const targetAmount = USE_GOLDCHARGE_CARD ? '1000' : '1500'
+    logWithTimestamp(`*** Looking for ADD button with amount ${targetAmount} ***`)
+    
+    let addButtonClicked = false
+    
+    // Strategy: Check the immediate row (class "vg-gread-row") which contains "ADD - AMOUNT"
+    for (let i = 0; i < allButtons.length; i++) {
+      try {
+        // Get the immediate row containing this button
+        const rowText = await allButtons[i].locator('xpath=ancestor::div[contains(@class, "vg-gread-row")]').first().textContent({ timeout: 2000 })
+        const normalizedText = rowText?.replace(/\s+/g, ' ').trim() || ''
+        console.log(`Button ${i} row: "${normalizedText}"`)
+        
+        // Check if this row contains "ADD - AMOUNT" pattern
+        if (normalizedText.includes(`ADD - ${targetAmount}`)) {
+          console.log(`✓ Found amount ${targetAmount} at button ${i}`)
+          await allButtons[i].click()
+          console.log(`✓ Clicked ADD button for ₹${targetAmount}`)
+          addButtonClicked = true
+          break
+        }
+      } catch (e) {
+        console.log(`Button ${i}: Skipping (${e.message?.substring(0, 50)}...)`)
+      }
+    }
+    
+    // Fallback to correct index based on page structure:
+    // Button 0=250, 1=1000, 2=1500, 3=2000
+    if (!addButtonClicked) {
+      const idx = USE_GOLDCHARGE_CARD ? 1 : 2  // 1 for ₹1000, 2 for ₹1500
+      console.log(`⚠ Using fallback index ${idx} for ₹${targetAmount}`)
+      if (allButtons.length > idx) {
+        await allButtons[idx].click()
+        console.log(`✓ Clicked ADD button at index ${idx}`)
+      } else {
+        // Last resort: use nth selector directly
+        console.log(`Only ${allButtons.length} buttons found, using nth(${idx}) selector`)
+        await page.getByRole('button', { name: 'ADD' }).nth(idx).click()
+        console.log(`✓ Clicked ADD button using nth(${idx})`)
+      }
+    }
+    
     await page.getByRole('link', { name: 'View Cart' }).click()
     await page.getByRole('button', { name: 'PAY NOW' }).click()
 
@@ -257,16 +320,27 @@ function logWithTimestamp(message, level = 'info') {
     await page.getByRole('textbox', { name: 'Enter OTP' }).fill(mobileOtp)
     await page.getByRole('button', { name: 'Submit' }).click()
 
-    // Skip promotional offers
-    logWithTimestamp('⏭️ Skipping promotional offers...')
-    await page.getByRole('button', { name: 'No thanks' }).click()
+    // Skip promotional offers (may not appear in headless mode)
+    logWithTimestamp('⏭️ Checking for promotional offers...')
+    try {
+      await page.getByRole('button', { name: 'No thanks' }).click({ timeout: 5000 })
+      logWithTimestamp('✅ Dismissed promotional offer')
+    } catch (e) {
+      logWithTimestamp('ℹ️ No promotional offer popup found, continuing...')
+    }
     await page.getByRole('button', { name: 'Pay Now' }).click()
 
     // Select payment method and enter CVV
     logWithTimestamp('💳 Setting up payment method...')
-    // await page.locator('[id="1000105"]').click(); // 1000 for Gold charge card
-    await page.locator('[id="1000075"]').click() //Membership rewards card
-    await page.getByRole('textbox', { name: 'C V V' }).fill(CARD_CVV)
+    if (USE_GOLDCHARGE_CARD) {
+      logWithTimestamp('*** Selecting GOLDCHARGE CARD (id: 1000105) ***')
+      await page.locator('[id="1000105"]').click()
+      await page.getByRole('textbox', { name: 'C V V' }).fill(GOLDCHARGE_CARD_CVV)
+    } else {
+      logWithTimestamp('*** Selecting MEMBERSHIP CARD (id: 1000075) ***')
+      await page.locator('[id="1000075"]').click()
+      await page.getByRole('textbox', { name: 'C V V' }).fill(MEMBERSHIP_CARD_CVV)
+    }
 
     // Click 'Proceed to Pay' and wait for redirect to SafeKey page
     logWithTimestamp('🔄 Proceeding to payment...')

@@ -15,12 +15,20 @@ app.use(express.json())
 const {
   MOBILE,
   EMAIL,
-  CARD_CVV,
-  GOLD_CHARGE_CVV,
-  GOLD_CHARGE,
+  MEMBERSHIP_CARD_CVV,
+  GOLDCHARGE_CARD_CVV,
+  USE_GOLDCHARGE_CARD,
   N8N_BASE_URL,
   WEBHOOK_PATH = '/webhook/ios-sms',
 } = process.env
+
+// DEBUG: Log env vars at startup
+console.log('=== ENV DEBUG ===')
+console.log(`USE_GOLDCHARGE_CARD env var raw value: "${USE_GOLDCHARGE_CARD}"`)
+console.log(`USE_GOLDCHARGE_CARD env var type: ${typeof USE_GOLDCHARGE_CARD}`)
+console.log(`USE_GOLDCHARGE_CARD parsed as boolean: ${String(USE_GOLDCHARGE_CARD).toLowerCase() === 'true'}`)
+console.log('=================')
+
 
 const POLLING_INTERVAL = 5000 // Increased to 5 seconds for better reliability
 const MAX_RETRIES = 5 // Increased to 5 retries (25 seconds total)
@@ -102,17 +110,28 @@ async function getOTPFromWebhook(otpType, timeoutMs = 120000) {
 }
 
 async function runAutomation(options = {}) {
+  // DEBUG: Log incoming options
+  console.log('=== runAutomation DEBUG ===')
+  console.log(`options received:`, JSON.stringify(options))
+  console.log(`options.goldCharge type: ${typeof options.goldCharge}`)
+  console.log(`options.goldCharge value: ${options.goldCharge}`)
+  
   const goldCharge =
     typeof options.goldCharge === 'boolean'
       ? options.goldCharge
-      : String(GOLD_CHARGE).toLowerCase() === 'true'
-  if (!MOBILE || !EMAIL || !CARD_CVV || !N8N_BASE_URL) {
-    throw new Error('MOBILE, EMAIL, CARD_CVV, N8N_BASE_URL must be set in env')
+      : String(USE_GOLDCHARGE_CARD).toLowerCase() === 'true'
+  
+  console.log(`RESOLVED goldCharge: ${goldCharge}`)
+  console.log(`*** CARD SELECTION: ${goldCharge ? 'GOLDCHARGE CARD (id: 1000105, ADD btn index: 2)' : 'MEMBERSHIP CARD (id: 1000075, ADD btn index: 3)'} ***`)
+  console.log('===========================')
+  
+  if (!MOBILE || !EMAIL || !MEMBERSHIP_CARD_CVV || !N8N_BASE_URL) {
+    throw new Error('MOBILE, EMAIL, MEMBERSHIP_CARD_CVV, N8N_BASE_URL must be set in env')
   }
   if (goldCharge) {
-    console.log('GOLD_CHARGE is true')
+    console.log('*** USING GOLDCHARGE CARD ***')
   } else {
-    console.log('GOLD_CHARGE is false')
+    console.log('*** USING MEMBERSHIP CARD ***')
   }
   console.log('Starting Playwright automation...')
 
@@ -181,18 +200,96 @@ async function runAutomation(options = {}) {
     await page.waitForLoadState('domcontentloaded')
     await page.waitForTimeout(2000) // Additional wait for dynamic content
 
-    console.log('Clicking ADD button...')
-    const addButtons = await page.getByRole('button', { name: 'ADD' }).all()
-    if (addButtons.length >= 4) {
-      if (goldCharge) {
-        console.log('Selecting GOLD_CHARGE amount (index 2)')
-        await addButtons[2].click()
-      } else {
-        console.log('Selecting MEMBERSHIP_REWARDS amount (index 3)')
-        await addButtons[3].click()
+    // Select ADD button by price instead of index
+    const targetAmount = goldCharge ? '1,000' : '1,500'
+    const targetAmountAlt = goldCharge ? '1000' : '1500' // Without comma
+    console.log(`Looking for ADD button with price ₹${targetAmount}...`)
+    
+    let addButtonClicked = false
+    
+    // Strategy 1: Find card/container with the price and click its ADD button
+    const pricePatterns = [
+      `₹${targetAmount}`,
+      `₹ ${targetAmount}`,
+      `Rs.${targetAmount}`,
+      `Rs. ${targetAmount}`,
+      `₹${targetAmountAlt}`,
+      `Rs.${targetAmountAlt}`,
+    ]
+    
+    for (const priceText of pricePatterns) {
+      if (addButtonClicked) break
+      try {
+        // Find elements containing the price text
+        const priceElements = await page.locator(`text="${priceText}"`).all()
+        console.log(`Found ${priceElements.length} elements with "${priceText}"`)
+        
+        for (const priceEl of priceElements) {
+          if (addButtonClicked) break
+          try {
+            // Look for ADD button in the same parent container
+            const container = priceEl.locator('xpath=ancestor::div[.//button[contains(text(), "ADD") or contains(text(), "Add")]]').first()
+            const addBtn = container.getByRole('button', { name: 'ADD' })
+            
+            if (await addBtn.isVisible({ timeout: 1000 })) {
+              await addBtn.click()
+              console.log(`✓ Clicked ADD button for ${priceText}`)
+              addButtonClicked = true
+              break
+            }
+          } catch (e) {
+            // Try next price element
+          }
+        }
+      } catch (e) {
+        console.log(`Price pattern "${priceText}" not found, trying next...`)
       }
-    } else {
-      await page.getByRole('button', { name: 'ADD' }).first().click()
+    }
+    
+    // Strategy 2: Fallback - find ADD button that has the price nearby (sibling/adjacent)
+    if (!addButtonClicked) {
+      console.log('Trying fallback: checking text near each ADD button...')
+      const allAddButtons = await page.getByRole('button', { name: 'ADD' }).all()
+      console.log(`Found ${allAddButtons.length} ADD buttons total`)
+      
+      for (let i = 0; i < allAddButtons.length; i++) {
+        const btn = allAddButtons[i]
+        try {
+          // Get the parent card/container and check its text content
+          const parentText = await btn.locator('xpath=ancestor::div[contains(@class, "card") or contains(@class, "item") or contains(@class, "product") or position() <= 5]').first().textContent()
+          console.log(`ADD button ${i} parent text: ${parentText?.substring(0, 100)}...`)
+          
+          const hasTargetPrice = pricePatterns.some(p => parentText?.includes(p))
+          if (hasTargetPrice) {
+            await btn.click()
+            console.log(`✓ Clicked ADD button ${i} (found price ${targetAmount} in parent)`)
+            addButtonClicked = true
+            break
+          }
+        } catch (e) {
+          // Continue to next button
+        }
+      }
+    }
+    
+    // Strategy 3: Last resort - use index (with warning)
+    if (!addButtonClicked) {
+      console.log('⚠ WARNING: Could not find ADD button by price, falling back to index!')
+      const addButtons = await page.getByRole('button', { name: 'ADD' }).all()
+      if (addButtons.length >= 4) {
+        const idx = goldCharge ? 1 : 2  // Button 0=250, 1=1000, 2=1500, 3=2000
+        console.log(`Falling back to index ${idx}`)
+        await addButtons[idx].click()
+        addButtonClicked = true
+      } else if (addButtons.length > 0) {
+        console.log('Falling back to first ADD button')
+        await addButtons[0].click()
+        addButtonClicked = true
+      }
+    }
+    
+    if (!addButtonClicked) {
+      throw new Error(`Could not find ADD button for amount ₹${targetAmount}`)
     }
 
     console.log('Clicking View Cart...')
@@ -272,18 +369,18 @@ async function runAutomation(options = {}) {
 
     console.log('Selecting card...')
     if (goldCharge) {
-      console.log('Choosing GOLD_CHARGE card (id 1000105)')
+      console.log('Choosing GOLDCHARGE_CARD (id 1000105)')
       await page.locator('[id="1000105"]').click()
     } else {
-      console.log('Choosing MEMBERSHIP_REWARDS card (id 1000075)')
+      console.log('Choosing MEMBERSHIP_CARD (id 1000075)')
       await page.locator('[id="1000075"]').click()
     }
 
     console.log('Filling CVV...')
     if (goldCharge) {
-      await page.getByRole('textbox', { name: 'C V V' }).fill(GOLD_CHARGE_CVV)
+      await page.getByRole('textbox', { name: 'C V V' }).fill(GOLDCHARGE_CARD_CVV)
     } else {
-      await page.getByRole('textbox', { name: 'C V V' }).fill(CARD_CVV)
+      await page.getByRole('textbox', { name: 'C V V' }).fill(MEMBERSHIP_CARD_CVV)
     }
 
     console.log('Clicking Proceed to Pay...')
@@ -563,6 +660,10 @@ app.get('/status', (req, res) => {
 })
 
 app.post('/start', async (req, res) => {
+  console.log('=== /start ENDPOINT DEBUG ===')
+  console.log(`Request body:`, JSON.stringify(req.body))
+  console.log(`req.body.goldCharge: ${req.body?.goldCharge} (type: ${typeof req.body?.goldCharge})`)
+  
   if (isRunning) {
     return res
       .status(409)
@@ -573,6 +674,11 @@ app.post('/start', async (req, res) => {
     typeof req.body?.goldCharge === 'boolean'
       ? req.body.goldCharge
       : String(req.body?.goldCharge || '').toLowerCase() === 'true'
+  
+  console.log(`goldChargeFlag resolved to: ${goldChargeFlag}`)
+  console.log(`*** WILL USE: ${goldChargeFlag ? 'GOLDCHARGE CARD' : 'MEMBERSHIP CARD'} ***`)
+  console.log('=============================')
+  
   try {
     await runAutomation({ goldCharge: goldChargeFlag })
     res.json({ success: true, message: 'Automation completed successfully' })
