@@ -1,6 +1,38 @@
 # Voucher Automation System
 
-Automate buying and claiming Swiggy vouchers from the AmEx Gyftr portal using Playwright, n8n webhooks, and an iOS Shortcut.
+Automate buying gift vouchers from the AmEx **ShopWise** (Giftstacc) portal using Playwright, n8n webhooks, and an iOS Shortcut. (The original Gyftr flow is retired — see `SHOPWISE_FLOW.md`.)
+
+## 🟢 ShopWise — quick start (current platform)
+
+```bash
+npm install
+cp example.env .env        # set MOBILE and N8N_BASE_URL (e.g. https://n8n.harshit.cloud)
+
+# 1) Safe dry run — logs in (OTP auto-fetched from n8n) + selects vouchers, but never pays:
+node shopwise_automate.js --plan shopwise-plan.example.json --dry-run
+
+# 2) Watch it live (a window opens):
+HEADLESS=false node shopwise_automate.js --plan shopwise-plan.example.json --dry-run
+
+# 3) Real run of a whole plan (buys every job, N times each):
+node shopwise_automate.js --plan shopwise-plan.example.json
+
+# Run just one job, or pause for manual SafeKey entry while the iframe step is hardened:
+node shopwise_automate.js --plan plan.json --only 0
+MANUAL_3DS=true node shopwise_automate.js --plan plan.json
+
+# As a service: POST /run {plan|planFile, dryRun, only} on :3000
+node shopwise_automate.js --serve
+```
+
+- **Plan format:** `shopwise-plan.example.json` — `brands` (name→productId), `cards` (name→PayU saved-card slot), and `jobs` (`brand`, `card`, `denominations`, `count`). Each `count` = a separate transaction (one milestone tick).
+- **OTPs** (login + SafeKey) are pulled automatically from n8n, fed by the iOS Shortcut relay (triggers: `ShopWise login OTP`, `CUSTCAP SOLUTIONS`, `E-Gift Voucher`; POST to `<n8n>/webhook/ios-sms`).
+- **n8n parser:** apply `shopwise-parser.js` to the "OTP/Voucher Parser & Storage" code node (+ add the `login_otp` line to the Respond node — see `SHOPWISE_FLOW.md`).
+
+---
+
+### Legacy (Gyftr) — retained for reference only
+
 
 ## 🎬 Demo
 

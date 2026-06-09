@@ -147,3 +147,7 @@ private/
 test_credentials.json
 test_secrets.json
 demo_credentials.json
+# ShopWise automation — local artifacts (not for the repo)
+.pw-browsers/
+shopwise-*.png
+shopwise-mrcc-test.json
