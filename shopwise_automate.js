@@ -331,10 +331,13 @@ async function fill3dsAcrossPages(ctx, otp) {
             log(`SafeKey field in frame [${fr.url().slice(0, 50)}] attrs=${JSON.stringify(attrs)}`)
             await inp.first().click({ timeout: 2000 }).catch(() => {})
             await inp.first().fill(otp).catch(async () => { await p.keyboard.type(otp, { delay: 80 }) })
-            const sub = fr.getByRole('button', { name: /submit|continue|verify|confirm|proceed|ok|pay/i }).or(fr.locator('input[type=submit]'))
-            if (await sub.first().isVisible({ timeout: 1000 }).catch(() => false)) await sub.first().click().catch(() => {})
-            else await p.keyboard.press('Enter').catch(() => {})
-            log('3DS: filled OTP into SafeKey ACS frame')
+            await sleep(500)
+            // SUBMIT: always press Enter on the OTP field (3DS forms submit on Enter), AND click a
+            // submit button if present. (Earlier bug: clicking a wrong "submit-ish" button skipped Enter.)
+            await inp.first().press('Enter').catch(() => {})
+            const sub = fr.getByRole('button', { name: /^\s*(submit|verify|confirm|proceed|continue|pay( now)?)\s*$/i }).or(fr.locator('input[type=submit], button[type=submit]'))
+            if (await sub.first().isVisible({ timeout: 1500 }).catch(() => false)) await sub.first().click().catch(() => {})
+            log('3DS: filled + submitted OTP in SafeKey ACS frame')
             break
           }
           await sleep(3000)
