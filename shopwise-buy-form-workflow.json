@@ -1,0 +1,96 @@
+{
+  "name": "ShopWise — Buy a Voucher (Form)",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "buy-voucher",
+        "formTitle": "Buy a ShopWise Voucher",
+        "formDescription": "Pick what to buy and how many. 'Dry run' selects without paying. 'Buy for real' charges the card.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "What do you want to buy?",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  { "option": "Amazon Pay ₹1,000 — Gold Charge" },
+                  { "option": "Amazon Pay ₹1,500 — MRCC (1000+500)" },
+                  { "option": "Amazon Pay ₹2,500 — MRCC" },
+                  { "option": "Amazon Pay ₹5,000 — MRCC" }
+                ]
+              },
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "How many transactions?",
+              "fieldType": "number",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Mode",
+              "fieldType": "dropdown",
+              "fieldOptions": {
+                "values": [
+                  { "option": "Dry run (no charge)" },
+                  { "option": "Buy for real" }
+                ]
+              },
+              "requiredField": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "b1f0c001-0001-4001-8001-000000000001",
+      "name": "Buy Voucher Form",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// CATALOG: map each dropdown option -> brand productId, card slot, denominations.\n// ADD NEW VOUCHERS/BRANDS HERE (e.g. Swiggy) — just add a line; the dropdown option label must match.\nconst CARD_SLOT = { charge: 0, mrcc: 1 }; // PayU saved-card slots\nconst CATALOG = {\n  'Amazon Pay ₹1,000 — Gold Charge':      { brand: 'amazonpay', productId: 'gko2OEEac6Y24dmH/bBa7g==', card: 'charge', denominations: [{ amount: 1000, qty: 1 }] },\n  'Amazon Pay ₹1,500 — MRCC (1000+500)':  { brand: 'amazonpay', productId: 'gko2OEEac6Y24dmH/bBa7g==', card: 'mrcc',   denominations: [{ amount: 1000, qty: 1 }, { amount: 500, qty: 1 }] },\n  'Amazon Pay ₹2,500 — MRCC':             { brand: 'amazonpay', productId: 'gko2OEEac6Y24dmH/bBa7g==', card: 'mrcc',   denominations: [{ amount: 2500, qty: 1 }] },\n  'Amazon Pay ₹5,000 — MRCC':             { brand: 'amazonpay', productId: 'gko2OEEac6Y24dmH/bBa7g==', card: 'mrcc',   denominations: [{ amount: 5000, qty: 1 }] }\n  // , 'Swiggy ₹1,500 — MRCC': { brand: 'swiggy', productId: '<grab from shopwise product URL>', card: 'mrcc', denominations: [{ amount: 1000, qty: 1 }, { amount: 500, qty: 1 }] }\n};\n\nconst f = $input.first().json;\nconst choice = f['What do you want to buy?'];\nconst count = Math.max(1, parseInt(f['How many transactions?'] || '1', 10) || 1);\nconst dryRun = String(f['Mode'] || '').toLowerCase().includes('dry');\n\nconst c = CATALOG[choice];\nif (!c) throw new Error('Unknown selection: ' + choice);\nconst plan = {\n  brands: { [c.brand]: c.productId },\n  cards:  { [c.card]: CARD_SLOT[c.card] },\n  jobs:   [ { name: choice, card: c.card, brand: c.brand, denominations: c.denominations, count } ]\n};\nreturn [{ json: { dryRun, plan, choice, count } }];"
+      },
+      "id": "b1f0c001-0002-4002-8002-000000000002",
+      "name": "Build Plan from selection",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://playwright-service:3000/run",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { dryRun: $json.dryRun, plan: $json.plan } }}",
+        "options": { "timeout": 1800000 }
+      },
+      "id": "b1f0c001-0003-4003-8003-000000000003",
+      "name": "Run Automation (server-side)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 300]
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "completionTitle": "Done ✅",
+        "completionMessage": "={{ (() => { const r = $json; const res = Array.isArray(r.results) ? r.results : []; const ok = res.filter(x => x && x.ok).length; const codes = []; for (const x of res) if (x && x.voucher && Array.isArray(x.voucher.vouchers)) for (const v of x.voucher.vouchers) codes.push(v.code); return `${ok}/${res.length} purchase(s) completed` + (res[0] && res[0].dryRun ? ' (dry run — nothing charged)' : '') + (codes.length ? '. Voucher codes: ' + codes.join(', ') : '. Vouchers will arrive by SMS/email.'); })() }}",
+        "options": {}
+      },
+      "id": "b1f0c001-0004-4004-8004-000000000004",
+      "name": "Show result",
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 1,
+      "position": [960, 300]
+    }
+  ],
+  "connections": {
+    "Buy Voucher Form": { "main": [[{ "node": "Build Plan from selection", "type": "main", "index": 0 }]] },
+    "Build Plan from selection": { "main": [[{ "node": "Run Automation (server-side)", "type": "main", "index": 0 }]] },
+    "Run Automation (server-side)": { "main": [[{ "node": "Show result", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" }
+}
