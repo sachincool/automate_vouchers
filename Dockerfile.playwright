@@ -12,6 +12,8 @@ RUN npm install --omit=dev --no-package-lock
 # Copy application files
 COPY server.js ./
 COPY gyftr_automate.js ./
+COPY shopwise_automate.js ./
+COPY shopwise-plan.example.json ./
 
 # Install Playwright browsers - playwright-extra uses playwright internally
 # The base image already has browsers, but ensure they're available
@@ -20,8 +22,10 @@ RUN npx playwright install chromium --with-deps || node ./node_modules/playwrigh
 # Create directory for screenshots
 RUN mkdir -p /app/screenshots
 
-# Set timezone
+# Set timezone; run the browser headful under a virtual display (xvfb) — matches the
+# proven-working local behavior and reduces bot-detection on the server IP.
 ENV TZ=Asia/Kolkata
+ENV HEADLESS=false
 
 # Expose port
 EXPOSE 3000
@@ -30,5 +34,6 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
   CMD node -e "require('http').get('http://localhost:3000/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})" || exit 1
 
-# Start the server
-CMD ["node", "server.js"]
+# Start the ShopWise automation service (headful under xvfb). n8n's Main Orchestrator
+# POSTs a plan to http://playwright-service:3000/run to launch a batch.
+CMD ["sh", "-lc", "xvfb-run -a node shopwise_automate.js --serve"]

@@ -523,7 +523,8 @@ if (require.main === module) {
         res.json({ ok: true, results })
       } catch (e) { res.status(500).json({ ok: false, error: e.message }) } finally { running = false }
     })
-    app.listen(3000, () => log('ShopWise automation service on :3000  (POST /run {plan|planFile, dryRun, only})'))
+    const PORT = parseInt(process.env.PORT || '3000', 10)
+    app.listen(PORT, () => log(`ShopWise automation service on :${PORT}  (POST /run {plan|planFile, dryRun, only})`))
   } else if (args.plan) {
     const plan = JSON.parse(fs.readFileSync(args.plan, 'utf8'))
     runPlan(plan, { dryRun: args.dryRun, only: args.only })
