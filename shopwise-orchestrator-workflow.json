@@ -1,0 +1,78 @@
+{
+  "name": "ShopWise Purchase Orchestrator",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "a1b2c3d4-0001-4001-8001-000000000001",
+      "name": "Run now (Manual)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [240, 180]
+    },
+    {
+      "parameters": {
+        "rule": { "interval": [ { "field": "cronExpression", "expression": "0 10 1 * *" } ] }
+      },
+      "id": "a1b2c3d4-0002-4002-8002-000000000002",
+      "name": "Schedule (off until workflow activated)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 380]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== EDIT YOUR PLAN HERE =====\n// dryRun:true  -> selects vouchers but does NOT pay (safe test).\n// dryRun:false -> real purchases (charges your card, hits the milestone).\nconst dryRun = true;\n\nconst plan = {\n  brands: {\n    amazonpay: 'gko2OEEac6Y24dmH/bBa7g=='\n    // add more brands: open the product on shopwise, copy productId from /giftcard?productId=...\n  },\n  cards: {\n    charge: 0, // PayU saved-card slot 0 = Gold Charge\n    mrcc: 1    // PayU saved-card slot 1 = MRCC\n  },\n  jobs: [\n    // count = number of separate transactions (each counts toward a milestone)\n    { name: 'MRCC Rs.1500 Amazon Pay', card: 'mrcc', brand: 'amazonpay', denominations: [{ amount: 1000, qty: 1 }, { amount: 500, qty: 1 }], count: 1 }\n    // , { name: 'Charge Rs.1000 Amazon Pay', card: 'charge', brand: 'amazonpay', denominations: [{ amount: 1000, qty: 1 }], count: 6 }\n  ]\n};\n\nreturn [{ json: { dryRun, plan } }];"
+      },
+      "id": "a1b2c3d4-0003-4003-8003-000000000003",
+      "name": "Build Plan (edit me)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 280]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://playwright-service:3000/run",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": { "timeout": 900000 }
+      },
+      "id": "a1b2c3d4-0004-4004-8004-000000000004",
+      "name": "Run Automation (server-side)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 280]
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $input.first().json || {};\nconst results = Array.isArray(r.results) ? r.results : [];\nconst ok = results.filter(x => x && x.ok).length;\nconst vouchers = [];\nfor (const x of results) if (x && x.voucher && Array.isArray(x.voucher.vouchers)) vouchers.push(...x.voucher.vouchers);\nreturn [{ json: {\n  summary: `${ok}/${results.length} job(s) OK${results[0] && results[0].dryRun ? ' (dry-run, no charge)' : ''}`,\n  ok_jobs: ok,\n  total_jobs: results.length,\n  vouchers,\n  raw: r\n} }];"
+      },
+      "id": "a1b2c3d4-0005-4005-8005-000000000005",
+      "name": "Summarize",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 280]
+    },
+    {
+      "parameters": {
+        "content": "## ShopWise Purchase Orchestrator\n\n**Run now:** click *Execute Workflow* (uses the Build Plan below).\n**Schedule:** activate this workflow to enable the monthly cron (1st @ 10:00).\n\n1. **Build Plan** – edit `dryRun` and `jobs` (brands/cards/counts).\n2. **Run Automation** – POSTs the plan to the playwright-service (`/run`), which logs in, buys each job server-side (OTPs auto-relayed via the OTP & Voucher Handler), auto-fills SafeKey, and reports to the milestone ledger.\n3. **Summarize** – shows jobs OK + captured vouchers.\n\n`dryRun:true` = no charge. Set `false` for real purchases.",
+        "height": 320,
+        "width": 420
+      },
+      "id": "a1b2c3d4-0006-4006-8006-000000000006",
+      "name": "How to use",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [240, 560]
+    }
+  ],
+  "connections": {
+    "Run now (Manual)": { "main": [[{ "node": "Build Plan (edit me)", "type": "main", "index": 0 }]] },
+    "Schedule (off until workflow activated)": { "main": [[{ "node": "Build Plan (edit me)", "type": "main", "index": 0 }]] },
+    "Build Plan (edit me)": { "main": [[{ "node": "Run Automation (server-side)", "type": "main", "index": 0 }]] },
+    "Run Automation (server-side)": { "main": [[{ "node": "Summarize", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" }
+}
