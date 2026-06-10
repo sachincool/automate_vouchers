@@ -216,7 +216,11 @@ async function selectDenominations(page, brandProductId, denominations) {
   }
   await clickish(page, /^Continue$/i)
   await page.waitForLoadState('domcontentloaded')
-  await sleep(2500)
+  // Wait for /card to actually RENDER before nudging — it loads slower on the server, and a
+  // fixed sleep fired while the page was still a spinner (steppers absent) → nudge no-op → ₹0.
+  await page.getByRole('button', { name: '+' }).first().waitFor({ state: 'visible', timeout: 40000 })
+  await page.waitForLoadState('networkidle').catch(() => {})
+  await sleep(1500)
   // On /card the order total reads ₹0 until each row's qty stepper ("+"/"-") is exercised
   // (the /giftcard pre-selection only populates the rows). Nudge +1 then −1 on every row to
   // commit the quantities, then confirm a non-zero total before paying.
