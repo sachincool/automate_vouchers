@@ -242,6 +242,7 @@ async function selectDenominations(page, brandProductId, denominations) {
 // PayU/Plural iframe; verified visually but hardened on live runs. MANUAL_3DS pauses
 // for a human to complete the SafeKey step (the fetched OTP is printed for them).
 async function payWithSavedCard(page, cardIndex) {
+  const ctx = page.context()
   log(`Payment: opening gateway, target saved-card slot ${cardIndex}`)
   const sinceServer = await serverNowMs() // baseline before triggering pay, so SafeKey OTP must be fresh
   // Razorpay renders its card UI into a nested/about:blank iframe — find the frame that actually
@@ -272,40 +273,136 @@ async function payWithSavedCard(page, cardIndex) {
 
   // SafeKey 3DS: fetch a FRESH payment OTP (created after we triggered pay).
   const otp = await waitForOtp('payment_otp', { timeoutMs: 240000, sinceServer }).catch((e) => { log(e.message); return null })
-  if (otp) {
-    log(`>>> SafeKey OTP: ${otp} <<<  (auto-filling; if it stalls, enter it manually)`)
-    if (!MANUAL) await tryFill3ds(page, otp).catch(() => {})
+  if (otp && !MANUAL) {
+    log(`>>> SafeKey OTP: ${otp} <<<  (auto-filling across all windows)`)
+    const filled = await fill3dsAcrossPages(ctx, otp).catch(() => false)
+    log(filled ? '3DS: auto-filled OTP ✓' : '3DS: could not locate the OTP field automatically')
+  } else if (otp) {
+    log(`>>> SafeKey OTP: ${otp} <<<  (enter manually)`)
   }
 
-  // Success = redirect to the order confirmation page (whether script or human completed it).
-  await page.waitForURL(/order-confirmation/i, { timeout: 240000 })
+  // Success = order confirmation in ANY window (the SafeKey popup or the main page).
+  const confPage = await waitForConfirmation(ctx, 240000)
   log('Payment: order confirmed')
+  return confPage
 }
 
-async function tryFill3ds(page, otp) {
-  const deadline = Date.now() + 60000
+// Scan EVERY page in the context (incl. the SafeKey 3DS popup) and their frames for the
+// OTP field; advance past the PineLabs "Go to payment page" interstitial; fill + submit.
+async function fill3dsAcrossPages(ctx, otp) {
+  const deadline = Date.now() + 120000
+  let dumped = false
+  let keyboardTried = false // type into the SafeKey popup at most ONCE (avoid corrupting the field)
   while (Date.now() < deadline) {
-    // try "Go to payment page" if the processing screen is showing it
-    for (const fr of [page, ...page.frames()]) {
-      const link = fr.getByText?.(/go to payment page/i)
-      if (link && (await link.first().isVisible({ timeout: 500 }).catch(() => false))) {
-        await link.first().click().catch(() => {})
-        await sleep(2000)
+    for (const p of ctx.pages()) {
+      if (/order-confirmation/i.test(p.url())) return true
+      for (const fr of [p, ...p.frames()]) {
+        const link = fr.getByText?.(/go to payment page/i)
+        if (link && (await link.first().isVisible({ timeout: 300 }).catch(() => false))) { await link.first().click().catch(() => {}); await sleep(1500) }
+      }
+      for (const fr of [p, ...p.frames()]) {
+        const inp = fr.locator?.(OTP_FIELD)
+        if (inp && (await inp.first().isVisible({ timeout: 300 }).catch(() => false))) {
+          await fillOtp(fr, otp)
+          const submit = fr.getByRole('button', { name: /submit|continue|verify|confirm|pay|proceed/i }).or(fr.locator('input[type=submit]'))
+          if (await submit.first().isVisible({ timeout: 800 }).catch(() => false)) await submit.first().click().catch(() => {})
+          return true
+        }
+      }
+      // Closed/hardened 3DS (e.g. Amex SafeKey /otc): no locatable input, but the OTP field is
+      // usually auto-focused — type the code via raw keyboard events into the popup, then submit.
+      if (!keyboardTried && /safekey|americanexpress|acs|3ds|otc/i.test(p.url())) {
+        keyboardTried = true
+        try {
+          await p.bringToFront().catch(() => {})
+          await sleep(1500) // let the Amex ACS form render inside its nested iframe
+          // The OTP field is in a nested iframe with a broad input type (text/number) — scan EVERY
+          // frame of the popup with a wide matcher, then click-focus + fill it.
+          const BROAD = 'input[type=text], input[type=tel], input[type=number], input[type=password], input[inputmode=numeric], input:not([type])'
+          for (const fr of [p, ...p.frames()]) {
+            const inp = fr.locator(BROAD)
+            const n = await inp.count().catch(() => 0)
+            if (!n) continue
+            const attrs = await inp.first().evaluate((e) => ({ type: e.type, name: e.name, id: e.id, ph: e.placeholder })).catch(() => ({}))
+            log(`SafeKey field in frame [${fr.url().slice(0, 50)}] attrs=${JSON.stringify(attrs)}`)
+            await inp.first().click({ timeout: 2000 }).catch(() => {})
+            await inp.first().fill(otp).catch(async () => { await p.keyboard.type(otp, { delay: 80 }) })
+            const sub = fr.getByRole('button', { name: /submit|continue|verify|confirm|proceed|ok|pay/i }).or(fr.locator('input[type=submit]'))
+            if (await sub.first().isVisible({ timeout: 1000 }).catch(() => false)) await sub.first().click().catch(() => {})
+            else await p.keyboard.press('Enter').catch(() => {})
+            log('3DS: filled OTP into SafeKey ACS frame')
+            break
+          }
+          await sleep(3000)
+          if (ctx.pages().some((pg) => /order-confirmation/i.test(pg.url()))) return true
+        } catch (e) { log('3DS attempt failed:', e.message) }
       }
     }
-    // try to find an OTP field anywhere and fill it
+    if (!dumped && Date.now() > deadline - 113000) { await dumpAllPages(ctx); dumped = true }
+    await sleep(2000)
+  }
+  await dumpAllPages(ctx)
+  return false
+}
+
+async function dumpAllPages(ctx) {
+  for (const p of ctx.pages()) {
+    log(`PAGE [${p.url().slice(0, 75)}]`)
+    for (const fr of p.frames()) {
+      const inputs = await fr.locator('input').evaluateAll((els) => els.map((e) => ({ t: e.type, n: e.name, id: e.id, ph: e.placeholder, ac: e.autocomplete }))).catch(() => [])
+      if (inputs.length) log(`  frame [${fr.url().slice(0, 60)}] inputs=${JSON.stringify(inputs).slice(0, 350)}`)
+    }
+  }
+}
+
+async function waitForConfirmation(ctx, timeoutMs) {
+  const end = Date.now() + timeoutMs
+  while (Date.now() < end) {
+    for (const p of ctx.pages()) { try { if (/order-confirmation/i.test(p.url())) return p } catch {} }
+    await sleep(2000)
+  }
+  throw new Error('Timeout waiting for order-confirmation')
+}
+
+// Diagnostic: dump every frame's inputs (with attributes) + buttons so the SafeKey 3DS
+// OTP-field selector can be hardened from real runs.
+async function dump3ds(page) {
+  for (const fr of page.frames()) {
+    const url = fr.url().slice(0, 75)
+    const inputs = await fr.locator('input').evaluateAll((els) => els.map((e) => ({ t: e.type, n: e.name, id: e.id, ph: e.placeholder, ac: e.autocomplete, im: e.inputMode, ml: e.maxLength }))).catch(() => [])
+    const btns = await fr.locator('button, input[type=submit]').allInnerTexts().catch(() => [])
+    if (inputs.length || btns.length) log(`3DS FRAME [${url}] inputs=${JSON.stringify(inputs).slice(0, 400)} buttons=${JSON.stringify(btns).slice(0, 150)}`)
+  }
+}
+
+const OTP_FIELD = 'input[type="password"], input[autocomplete="one-time-code"], input[name*="otp" i], input[id*="otp" i], input[placeholder*="otp" i], input[placeholder*="code" i], input[inputmode="numeric"], input[type="tel"]'
+
+async function tryFill3ds(page, otp) {
+  const deadline = Date.now() + 90000
+  let dumped = false
+  while (Date.now() < deadline) {
+    // advance past the PineLabs "Processing… / Go to payment page" interstitial if present
     for (const fr of [page, ...page.frames()]) {
-      const inp = fr.locator?.('input[type="password"], input[autocomplete="one-time-code"], input[name*="otp" i], input[inputmode="numeric"]')
+      const link = fr.getByText?.(/go to payment page/i)
+      if (link && (await link.first().isVisible({ timeout: 500 }).catch(() => false))) { await link.first().click().catch(() => {}); await sleep(2000) }
+    }
+    // one diagnostic dump of all frames once the 3DS UI has had a moment to render
+    if (!dumped && Date.now() - (deadline - 90000) > 6000) { await dump3ds(page); dumped = true }
+    // find an OTP field anywhere and fill it
+    for (const fr of [page, ...page.frames()]) {
+      const inp = fr.locator?.(OTP_FIELD)
       if (inp && (await inp.first().isVisible({ timeout: 500 }).catch(() => false))) {
         await fillOtp(fr, otp)
-        const submit = fr.getByRole('button', { name: /submit|continue|verify|confirm|pay/i })
+        const submit = fr.getByRole('button', { name: /submit|continue|verify|confirm|pay|proceed/i }).or(fr.locator('input[type=submit]'))
         if (await submit.first().isVisible({ timeout: 1000 }).catch(() => false)) await submit.first().click().catch(() => {})
+        log('3DS: filled OTP field')
         return true
       }
     }
     if (/order-confirmation/i.test(page.url())) return true
     await sleep(2500)
   }
+  await dump3ds(page) // final dump if we never found the field
   return false
 }
 
@@ -351,8 +448,8 @@ async function buyVoucher(page, job, cardsMap, brandsMap, { dryRun = false } = {
   }
   await buyNow.first().scrollIntoViewIfNeeded().catch(() => {})
   await buyNow.first().click({ timeout: 8000 }).catch(async () => { await buyNow.first().click({ force: true }) })
-  await payWithSavedCard(page, cardIndex)
-  const voucher = await captureVoucher(page)
+  const confPage = await payWithSavedCard(page, cardIndex)
+  const voucher = await captureVoucher(confPage || page)
   log(`Voucher: ${JSON.stringify(voucher)}`)
   await reportTransaction({ card: job.card, brand: job.brand, value: total, order: voucher.order, voucher_code: voucher.code, voucher_pin: voucher.pin })
   return { ok: true, total, voucher }
