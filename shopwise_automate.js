@@ -407,21 +407,19 @@ async function tryFill3ds(page, otp) {
 }
 
 async function captureVoucher(page) {
-  // On /order-confirmation, "Get Code" reveals the voucher; also fall back to n8n.
-  const out = { order: null, value: null, code: null, pin: null }
-  out.order = (await page.getByText(/Order Number/i).locator('xpath=following::*[1]').textContent({ timeout: 3000 }).catch(() => null)) || null
-  const getCode = page.getByRole('button', { name: /get code/i })
-  if (await getCode.first().isVisible({ timeout: 5000 }).catch(() => false)) {
-    await getCode.first().click().catch(() => {})
-    await sleep(2500)
-    const body = (await page.textContent('body').catch(() => '')) || ''
-    const m = body.match(/\b(\d{12,19})\b/)
-    if (m) out.code = m[1]
-  }
-  if (!out.code) {
-    const s = await getState()
-    if (s && s.voucher_code) { out.code = s.voucher_code; out.pin = s.voucher_pin }
-  }
+  // The order confirmation lists ONE row per voucher — a 1000+500 order = TWO vouchers / two codes.
+  // Click every "Get Code" to reveal them, then scrape all codes. n8n ledger (SMS) also has them.
+  const out = { order: null, vouchers: [] }
+  out.order = ((await page.getByText(/Order Number/i).locator('xpath=following::*[1]').textContent({ timeout: 3000 }).catch(() => '')) || '').trim() || null
+  const getCodes = page.getByRole('button', { name: /get code/i })
+  const n = await getCodes.count().catch(() => 0)
+  for (let i = 0; i < n; i++) { await getCodes.nth(i).click().catch(() => {}); await sleep(1500) }
+  const body = (await page.textContent('body').catch(() => '')) || ''
+  const codes = [...new Set([...body.matchAll(/\b([0-9]{12,19})\b/g)].map((m) => m[1]))]
+  out.vouchers = codes.map((c) => ({ code: c }))
+  // Fallback / pins: the n8n ledger holds SMS-sourced vouchers (with claim-code pins).
+  const s = await getState()
+  if (s && Array.isArray(s.vouchers) && s.vouchers.length && !out.vouchers.length) out.vouchers = s.vouchers.slice(0, 4)
   return out
 }
 
@@ -451,7 +449,7 @@ async function buyVoucher(page, job, cardsMap, brandsMap, { dryRun = false } = {
   const confPage = await payWithSavedCard(page, cardIndex)
   const voucher = await captureVoucher(confPage || page)
   log(`Voucher: ${JSON.stringify(voucher)}`)
-  await reportTransaction({ card: job.card, brand: job.brand, value: total, order: voucher.order, voucher_code: voucher.code, voucher_pin: voucher.pin })
+  await reportTransaction({ card: job.card, brand: job.brand, value: total, order: voucher.order, vouchers: voucher.vouchers })
   return { ok: true, total, voucher }
 }
 

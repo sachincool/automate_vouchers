@@ -114,9 +114,17 @@ try {
 
   // 1) Transaction event from the automation -> milestone counters (no SMS parsing)
   if (body && body.type === 'transaction') {
-    const l = addTransaction({ card: body.card, brand: body.brand, value: body.value, order: body.order, voucher_code: body.voucher_code || null, voucher_pin: body.voucher_pin || null })
-    if (body.voucher_code && body.voucher_pin) addVoucher({ code: body.voucher_code, pin: body.voucher_pin, value: body.value, brand: body.brand, source: 'automation', ts: now() })
-    return [{ json: { success: true, content_type: 'transaction', current_globals: getOtp(), ledger: ledgerSummary(), counters: l.counters, timestamp: now(), message: `Recorded transaction for ${body.card}` } }]
+    const l = addTransaction({ card: body.card, brand: body.brand, value: body.value, order: body.order })
+    // A single order can yield multiple vouchers (e.g. 1000+500 = two codes). Persist each.
+    const vs = Array.isArray(body.vouchers) ? body.vouchers : (body.voucher_code ? [{ code: body.voucher_code, pin: body.voucher_pin }] : [])
+    for (const v of vs) if (v && v.code) addVoucher({ code: v.code, pin: v.pin || null, value: v.value || null, brand: body.brand, source: 'automation', ts: now() })
+    return [{ json: { success: true, content_type: 'transaction', current_globals: getOtp(), ledger: ledgerSummary(), counters: l.counters, timestamp: now(), message: `Recorded transaction for ${body.card} (${vs.length} vouchers)` } }]
+  }
+
+  // Reset the milestone ledger (clears vouchers/transactions/counters) — POST {"type":"reset_ledger"}
+  if (body && body.type === 'reset_ledger') {
+    saveLedger({ vouchers: [], transactions: [], counters: {} })
+    return [{ json: { success: true, content_type: 'reset', current_globals: getOtp(), ledger: ledgerSummary(), timestamp: now(), message: 'Ledger reset' } }]
   }
 
   clearExpiredOtp()
