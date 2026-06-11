@@ -452,9 +452,9 @@ async function tryFill3ds(page, otp) {
   return false
 }
 
-async function captureVoucher(page) {
+async function captureVoucher(page, sinceMs = 0) {
   // The order confirmation lists ONE row per voucher — a 1000+500 order = TWO vouchers / two codes.
-  // Click every "Get Code" to reveal them, then scrape all codes. n8n ledger (SMS) also has them.
+  // Click every "Get Code" to reveal them, then scrape all codes off the page.
   const out = { order: null, vouchers: [] }
   out.order = ((await page.getByText(/Order Number/i).locator('xpath=following::*[1]').textContent({ timeout: 3000 }).catch(() => '')) || '').trim() || null
   const getCodes = page.getByRole('button', { name: /get code/i })
@@ -462,10 +462,17 @@ async function captureVoucher(page) {
   for (let i = 0; i < n; i++) { await getCodes.nth(i).click().catch(() => {}); await sleep(1500) }
   const body = (await page.textContent('body').catch(() => '')) || ''
   const codes = [...new Set([...body.matchAll(/\b([0-9]{12,19})\b/g)].map((m) => m[1]))]
-  out.vouchers = codes.map((c) => ({ code: c }))
-  // Fallback / pins: the n8n ledger holds SMS-sourced vouchers (with claim-code pins).
-  const s = await getState()
-  if (s && Array.isArray(s.vouchers) && s.vouchers.length && !out.vouchers.length) out.vouchers = s.vouchers.slice(0, 4)
+  if (codes.length) { out.vouchers = codes.map((c) => ({ code: c })); return out }
+  // Most brands deliver the voucher by SMS/email AFTER the order, not on the page. Poll the n8n
+  // ledger for FRESH vouchers (ts created after THIS purchase started). NEVER fall back to
+  // pre-existing/stale vouchers — that once attached the wrong brand's codes to a transaction.
+  const end = Date.now() + 90000
+  while (Date.now() < end) {
+    const s = await getState()
+    const fresh = (s && Array.isArray(s.vouchers) ? s.vouchers : []).filter((v) => v && v.ts && Date.parse(v.ts) >= sinceMs && (v.source || '') !== 'automation')
+    if (fresh.length) { out.vouchers = fresh.slice(0, 4); break }
+    await sleep(5000)
+  }
   return out
 }
 
@@ -491,9 +498,10 @@ async function buyVoucher(page, job, cardsMap, brandsMap, { dryRun = false } = {
     return { ok: true, dryRun: true, total }
   }
   await buyNow.first().scrollIntoViewIfNeeded().catch(() => {})
+  const buyStart = await serverNowMs().catch(() => Date.now()) // baseline: only vouchers created after this count
   await buyNow.first().click({ timeout: 8000 }).catch(async () => { await buyNow.first().click({ force: true }) })
   const confPage = await payWithSavedCard(page, cardIndex)
-  const voucher = await captureVoucher(confPage || page)
+  const voucher = await captureVoucher(confPage || page, buyStart)
   log(`Voucher: ${JSON.stringify(voucher)}`)
   await reportTransaction({ card: job.card, brand: job.brand, value: total, order: voucher.order, vouchers: voucher.vouchers })
   return { ok: true, total, voucher }

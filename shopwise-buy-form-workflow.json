@@ -1,4 +1,5 @@
 {
+  "id": "ZaNU9i87UbaIvZWU",
   "name": "ShopWise — Buy a Voucher (Form)",
   "nodes": [
     {
@@ -16,7 +17,10 @@
                   { "option": "Amazon Pay ₹1,000 — Gold Charge" },
                   { "option": "Amazon Pay ₹1,500 — MRCC (1000+500)" },
                   { "option": "Amazon Pay ₹2,500 — MRCC" },
-                  { "option": "Amazon Pay ₹5,000 — MRCC" }
+                  { "option": "Amazon Pay ₹5,000 — MRCC" },
+                  { "option": "Swiggy ₹1,000 — Gold Charge" },
+                  { "option": "Swiggy ₹1,500 — MRCC (1000+500)" },
+                  { "option": "Swiggy ₹2,000 — MRCC" }
                 ]
               },
               "requiredField": true
@@ -45,11 +49,12 @@
       "name": "Buy Voucher Form",
       "type": "n8n-nodes-base.formTrigger",
       "typeVersion": 2.1,
-      "position": [240, 300]
+      "position": [240, 300],
+      "webhookId": "b1f0c001-0001-4001-8001-000000000f01"
     },
     {
       "parameters": {
-        "jsCode": "// CATALOG: map each dropdown option -> brand productId, card slot, denominations.\n// ADD NEW VOUCHERS/BRANDS HERE (e.g. Swiggy) — just add a line; the dropdown option label must match.\nconst CARD_SLOT = { charge: 0, mrcc: 1 }; // PayU saved-card slots\nconst CATALOG = {\n  'Amazon Pay ₹1,000 — Gold Charge':      { brand: 'amazonpay', productId: 'gko2OEEac6Y24dmH/bBa7g==', card: 'charge', denominations: [{ amount: 1000, qty: 1 }] },\n  'Amazon Pay ₹1,500 — MRCC (1000+500)':  { brand: 'amazonpay', productId: 'gko2OEEac6Y24dmH/bBa7g==', card: 'mrcc',   denominations: [{ amount: 1000, qty: 1 }, { amount: 500, qty: 1 }] },\n  'Amazon Pay ₹2,500 — MRCC':             { brand: 'amazonpay', productId: 'gko2OEEac6Y24dmH/bBa7g==', card: 'mrcc',   denominations: [{ amount: 2500, qty: 1 }] },\n  'Amazon Pay ₹5,000 — MRCC':             { brand: 'amazonpay', productId: 'gko2OEEac6Y24dmH/bBa7g==', card: 'mrcc',   denominations: [{ amount: 5000, qty: 1 }] }\n  // , 'Swiggy ₹1,500 — MRCC': { brand: 'swiggy', productId: '<grab from shopwise product URL>', card: 'mrcc', denominations: [{ amount: 1000, qty: 1 }, { amount: 500, qty: 1 }] }\n};\n\nconst f = $input.first().json;\nconst choice = f['What do you want to buy?'];\nconst count = Math.max(1, parseInt(f['How many transactions?'] || '1', 10) || 1);\nconst dryRun = String(f['Mode'] || '').toLowerCase().includes('dry');\n\nconst c = CATALOG[choice];\nif (!c) throw new Error('Unknown selection: ' + choice);\nconst plan = {\n  brands: { [c.brand]: c.productId },\n  cards:  { [c.card]: CARD_SLOT[c.card] },\n  jobs:   [ { name: choice, card: c.card, brand: c.brand, denominations: c.denominations, count } ]\n};\nreturn [{ json: { dryRun, plan, choice, count } }];"
+        "jsCode": "// CATALOG: map each dropdown option -> brand productId, card slot, denominations.\n// ADD NEW VOUCHERS/BRANDS HERE (e.g. Swiggy) — just add a line; the dropdown option label must match.\nconst CARD_SLOT = { charge: 0, mrcc: 1 }; // PayU saved-card slots\nconst CATALOG = {\n  'Amazon Pay ₹1,000 — Gold Charge':      { brand: 'amazonpay', productId: 'gko2OEEac6Y24dmH/bBa7g==', card: 'charge', denominations: [{ amount: 1000, qty: 1 }] },\n  'Amazon Pay ₹1,500 — MRCC (1000+500)':  { brand: 'amazonpay', productId: 'gko2OEEac6Y24dmH/bBa7g==', card: 'mrcc',   denominations: [{ amount: 1000, qty: 1 }, { amount: 500, qty: 1 }] },\n  'Amazon Pay ₹2,500 — MRCC':             { brand: 'amazonpay', productId: 'gko2OEEac6Y24dmH/bBa7g==', card: 'mrcc',   denominations: [{ amount: 2500, qty: 1 }] },\n  'Amazon Pay ₹5,000 — MRCC':             { brand: 'amazonpay', productId: 'gko2OEEac6Y24dmH/bBa7g==', card: 'mrcc',   denominations: [{ amount: 5000, qty: 1 }] },\n  'Swiggy ₹1,000 — Gold Charge':          { brand: 'swiggy',    productId: '67QXkJBH5ual2f8tm2sCvQ==', card: 'charge', denominations: [{ amount: 1000, qty: 1 }] },\n  'Swiggy ₹1,500 — MRCC (1000+500)':      { brand: 'swiggy',    productId: '67QXkJBH5ual2f8tm2sCvQ==', card: 'mrcc',   denominations: [{ amount: 1000, qty: 1 }, { amount: 500, qty: 1 }] },\n  'Swiggy ₹2,000 — MRCC':                 { brand: 'swiggy',    productId: '67QXkJBH5ual2f8tm2sCvQ==', card: 'mrcc',   denominations: [{ amount: 2000, qty: 1 }] }\n};\n\nconst f = $input.first().json;\nconst choice = f['What do you want to buy?'];\nconst count = Math.max(1, parseInt(f['How many transactions?'] || '1', 10) || 1);\nconst dryRun = String(f['Mode'] || '').toLowerCase().includes('dry');\n\nconst c = CATALOG[choice];\nif (!c) throw new Error('Unknown selection: ' + choice);\nconst plan = {\n  brands: { [c.brand]: c.productId },\n  cards:  { [c.card]: CARD_SLOT[c.card] },\n  jobs:   [ { name: choice, card: c.card, brand: c.brand, denominations: c.denominations, count } ]\n};\nreturn [{ json: { dryRun, plan, choice, count } }];"
       },
       "id": "b1f0c001-0002-4002-8002-000000000002",
       "name": "Build Plan from selection",
