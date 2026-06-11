@@ -129,11 +129,14 @@ function payuFrame(page) {
 // Find the frame that actually CONTAINS payment content (Razorpay nests into about:blank /
 // child iframes), by scanning every frame's text — robust to which URL the content lives in.
 async function findPayFrame(page) {
-  const end = Date.now() + 30000
+  const end = Date.now() + 90000
   const rx = /pay now|saved cards|card ending|no cvv|credit card|enter cvv|one[- ]?time password|otp/i
   while (Date.now() < end) {
     for (const fr of page.frames()) {
-      const txt = (await fr.locator('body').innerText({ timeout: 700 }).catch(() => '')) || ''
+      // Match the REAL PayU payment frame by URL (api.payu.in/webcheckoutpro) — present immediately,
+      // even before text renders. Do NOT match the empty api.razorpay decoy frame (no cards).
+      if (/payu|webcheckout|plural|custcap/i.test(fr.url())) return fr
+      const txt = (await fr.locator('body').innerText({ timeout: 600 }).catch(() => '')) || ''
       if (rx.test(txt)) return fr
     }
     await sleep(1000)
@@ -239,6 +242,14 @@ async function selectDenominations(page, brandProductId, denominations) {
   }
   log(`Checkout total: "${label}"`)
   if (!/[1-9]/.test(label.replace(/buy now with/i, ''))) throw new Error('Checkout total is ₹0 after qty nudge — order not registered')
+  // Merchant caps each brand at a monthly ₹ limit. When hit, the Buy-now button is DISABLED and a
+  // banner shows — clicking does nothing, so the gateway never opens and payment would hang. Detect + fail fast.
+  const limitBanner = await page.getByText(/reached this month'?s limit/i).first().isVisible({ timeout: 1500 }).catch(() => false)
+  const buyDisabled = await buyNow.first().isDisabled({ timeout: 1500 }).catch(() => false)
+  if (limitBanner || buyDisabled) {
+    const msg = ((await page.getByText(/reached this month'?s limit[^.]*\./i).first().textContent({ timeout: 1500 }).catch(() => '')) || '').replace(/\s+/g, ' ').trim()
+    throw new Error(`MONTHLY_LIMIT_REACHED — ${msg || 'Buy-now is disabled (monthly brand limit hit). Resets on the 1st, or ~30 min after a failed/cancelled attempt.'}`)
+  }
   return buyNow
 }
 
@@ -253,6 +264,10 @@ async function payWithSavedCard(page, cardIndex) {
   // contains payment content (not just the first razorpay-URL frame), and dump all frames for hardening.
   const frame = await findPayFrame(page)
   await dumpFrames(page)
+  // Capture the gateway state on EVERY open window so we can diagnose what the gateway actually shows.
+  for (let i = 0; i < ctx.pages().length; i++) {
+    await ctx.pages()[i].screenshot({ path: `gateway-${i}.png`, fullPage: true }).catch(() => {})
+  }
 
   // Best-effort auto: select saved card + PAY NOW. Never throw — fall back to manual.
   if (frame && !MANUAL) {
@@ -296,7 +311,7 @@ async function payWithSavedCard(page, cardIndex) {
 async function fill3dsAcrossPages(ctx, otp) {
   const deadline = Date.now() + 120000
   let dumped = false
-  let keyboardTried = false // type into the SafeKey popup at most ONCE (avoid corrupting the field)
+  let submitted = false // once the OTP is verified in the field + Continue clicked, stop re-typing
   while (Date.now() < deadline) {
     for (const p of ctx.pages()) {
       if (/order-confirmation/i.test(p.url())) return true
@@ -315,34 +330,52 @@ async function fill3dsAcrossPages(ctx, otp) {
       }
       // Closed/hardened 3DS (e.g. Amex SafeKey /otc): no locatable input, but the OTP field is
       // usually auto-focused — type the code via raw keyboard events into the popup, then submit.
-      if (!keyboardTried && /safekey|americanexpress|acs|3ds|otc/i.test(p.url())) {
-        keyboardTried = true
+      if (!submitted && /safekey|americanexpress|acs|3ds|otc/i.test(p.url())) {
         try {
           await p.bringToFront().catch(() => {})
-          await sleep(1500) // let the Amex ACS form render inside its nested iframe
-          // The OTP field is in a nested iframe with a broad input type (text/number) — scan EVERY
-          // frame of the popup with a wide matcher, then click-focus + fill it.
+          // The SafeKey popup opens with ZERO width (screenshots failed with "0 width"). A 0-size
+          // window leaves the OTP field/Continue button without layout, so the form's JS never
+          // processes the typed code and Continue stays inert. Give the popup real dimensions first.
+          await p.setViewportSize({ width: 500, height: 760 }).catch(() => {})
+          await p.evaluate(() => { try { window.resizeTo(500, 760) } catch (e) {} }).catch(() => {})
+          await sleep(600)
+          // The Amex SafeKey /otc SPA re-renders the OTP field on focus, detaching stale element
+          // handles — so .fill()/keyboard.type into a now-detached node silently lost the digits
+          // (readback showed an empty field while the page kept asking for the code). Defense:
+          // locate FRESH, focus, let it settle, type char-by-char, then VERIFY inputValue actually
+          // holds the code BEFORE clicking Continue. The outer while-loop retries until it sticks.
           const BROAD = 'input[type=text], input[type=tel], input[type=number], input[type=password], input[inputmode=numeric], input:not([type])'
           for (const fr of [p, ...p.frames()]) {
-            const inp = fr.locator(BROAD)
-            const n = await inp.count().catch(() => 0)
-            if (!n) continue
-            const attrs = await inp.first().evaluate((e) => ({ type: e.type, name: e.name, id: e.id, ph: e.placeholder })).catch(() => ({}))
-            log(`SafeKey field in frame [${fr.url().slice(0, 50)}] attrs=${JSON.stringify(attrs)}`)
-            await inp.first().click({ timeout: 2000 }).catch(() => {})
-            await inp.first().fill(otp).catch(async () => { await p.keyboard.type(otp, { delay: 80 }) })
-            await sleep(500)
-            // SUBMIT: always press Enter on the OTP field (3DS forms submit on Enter), AND click a
-            // submit button if present. (Earlier bug: clicking a wrong "submit-ish" button skipped Enter.)
-            await inp.first().press('Enter').catch(() => {})
-            const sub = fr.getByRole('button', { name: /^\s*(submit|verify|confirm|proceed|continue|pay( now)?)\s*$/i }).or(fr.locator('input[type=submit], button[type=submit]'))
-            if (await sub.first().isVisible({ timeout: 1500 }).catch(() => false)) await sub.first().click().catch(() => {})
-            log('3DS: filled + submitted OTP in SafeKey ACS frame')
+            const box = fr.locator(BROAD).first()
+            if (!(await box.isVisible({ timeout: 400 }).catch(() => false))) continue
+            let v = (await box.inputValue().catch(() => '')) || ''
+            if (!v.replace(/\D/g, '').includes(otp)) {
+              await box.click({ timeout: 1500 }).catch(() => {})
+              await sleep(450) // let the SPA finish re-rendering the field after focus
+              await box.fill('').catch(() => {})
+              await box.pressSequentially(otp, { delay: 140 }).catch(async () => { await p.keyboard.type(otp, { delay: 140 }) })
+              await sleep(500)
+              v = (await box.inputValue().catch(() => '')) || ''
+            }
+            log(`SafeKey field [${fr.url().slice(0, 40)}] value="${v}"`)
+            if (v.replace(/\D/g, '').includes(otp)) {
+              await p.screenshot({ path: 'safekey-filled.png' }).catch((e) => log('safekey screenshot failed: ' + e.message))
+              // Click the Continue/submit BUTTON only. Do NOT press Enter first — on this Amex variant
+              // Enter can trigger "Resend password", which invalidates the OTP we just typed.
+              const sub = fr.getByRole('button', { name: /^\s*(submit|verify|confirm|proceed|continue|pay( now)?)\s*$/i }).or(fr.locator('input[type=submit], button[type=submit]'))
+              const nSub = await sub.count().catch(() => 0)
+              if (nSub) { await sub.first().scrollIntoViewIfNeeded().catch(() => {}); await sub.first().click({ timeout: 4000 }).catch(async () => { await sub.first().click({ force: true }).catch(() => {}) }); log(`SafeKey: clicked submit (${nSub} candidate${nSub > 1 ? 's' : ''})`) }
+              else { await box.press('Enter').catch(() => {}); log('SafeKey: no submit button found, pressed Enter') }
+              submitted = true
+              await sleep(4000)
+              const t2 = ((await p.locator('body').innerText({ timeout: 1000 }).catch(() => '')) || '').replace(/\s+/g, ' ').slice(0, 320)
+              log(`SafeKey after submit: "${t2}"`)
+              log('3DS: OTP verified in field + submitted ✓')
+            }
             break
           }
-          await sleep(3000)
           if (ctx.pages().some((pg) => /order-confirmation/i.test(pg.url()))) return true
-        } catch (e) { log('3DS attempt failed:', e.message) }
+        } catch (e) { log('3DS attempt failed: ' + e.message) }
       }
     }
     if (!dumped && Date.now() > deadline - 113000) { await dumpAllPages(ctx); dumped = true }
@@ -353,8 +386,10 @@ async function fill3dsAcrossPages(ctx, otp) {
 }
 
 async function dumpAllPages(ctx) {
+  let i = 0
   for (const p of ctx.pages()) {
     log(`PAGE [${p.url().slice(0, 75)}]`)
+    await p.screenshot({ path: `stuck-page-${i++}.png` }).catch(() => {})
     for (const fr of p.frames()) {
       const inputs = await fr.locator('input').evaluateAll((els) => els.map((e) => ({ t: e.type, n: e.name, id: e.id, ph: e.placeholder, ac: e.autocomplete }))).catch(() => [])
       if (inputs.length) log(`  frame [${fr.url().slice(0, 60)}] inputs=${JSON.stringify(inputs).slice(0, 350)}`)
@@ -364,10 +399,14 @@ async function dumpAllPages(ctx) {
 
 async function waitForConfirmation(ctx, timeoutMs) {
   const end = Date.now() + timeoutMs
+  // Success = a NAVIGATION to a confirmation/success page. Do NOT match page TEXT — the /card page
+  // permanently shows "Your e-gift voucher will be sent..." which falsely looks like success.
+  const urlRx = /order-confirmation|order[-_]?success|payment[-_]?success|order[-_]?placed|\/(success|confirmation|thank[-_]?you)\b/i
   while (Date.now() < end) {
-    for (const p of ctx.pages()) { try { if (/order-confirmation/i.test(p.url())) return p } catch {} }
+    for (const p of ctx.pages()) { try { if (urlRx.test(p.url())) return p } catch {} }
     await sleep(2000)
   }
+  await dumpAllPages(ctx) // screenshot every window so we can SEE why confirmation never appeared
   throw new Error('Timeout waiting for order-confirmation')
 }
 
