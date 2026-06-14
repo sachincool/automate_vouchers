@@ -81,7 +81,7 @@
       "parameters": {
         "operation": "completion",
         "completionTitle": "Done ✅",
-        "completionMessage": "={{ (() => { const r = $json; const res = Array.isArray(r.results) ? r.results : []; const ok = res.filter(x => x && x.ok).length; const codes = []; for (const x of res) if (x && x.voucher && Array.isArray(x.voucher.vouchers)) for (const v of x.voucher.vouchers) codes.push(v.code); return `${ok}/${res.length} purchase(s) completed` + (res[0] && res[0].dryRun ? ' (dry run — nothing charged)' : '') + (codes.length ? '. Voucher codes: ' + codes.join(', ') : '. Vouchers will arrive by SMS/email.'); })() }}",
+        "completionMessage": "={{ (() => { const r = $json; const res = Array.isArray(r.results) ? r.results : []; const ok = res.filter(x => x && x.ok).length; const codes = []; for (const x of res) if (x && x.voucher && Array.isArray(x.voucher.vouchers)) for (const v of x.voucher.vouchers) codes.push(v.pin ? `${v.code} (PIN: ${v.pin})` : v.code); return `${ok}/${res.length} purchase(s) completed` + (res[0] && res[0].dryRun ? ' (dry run — nothing charged)' : '') + (codes.length ? '. Voucher codes: ' + codes.join(', ') : '. Vouchers will arrive by SMS/email.'); })() }}",
         "options": {}
       },
       "id": "b1f0c001-0004-4004-8004-000000000004",
