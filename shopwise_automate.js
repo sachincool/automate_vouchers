@@ -120,12 +120,6 @@ async function isSessionExpired(page) {
   const t = (await page.locator('body').textContent({ timeout: 1500 }).catch(() => '')) || ''
   return /session expired/i.test(t)
 }
-// Find the payment-gateway iframe among the page's frames (Razorpay is the live gateway;
-// keep the others as fallbacks in case the provider changes).
-function payuFrame(page) {
-  const f = page.frames().find((fr) => /razorpay|payu|plural|secure|3ds|acs|custcap/i.test(fr.url()))
-  return f || null
-}
 // Find the frame that actually CONTAINS payment content (Razorpay nests into about:blank /
 // child iframes), by scanning every frame's text — robust to which URL the content lives in.
 async function findPayFrame(page) {
@@ -337,7 +331,7 @@ async function fill3dsAcrossPages(ctx, otp) {
           // window leaves the OTP field/Continue button without layout, so the form's JS never
           // processes the typed code and Continue stays inert. Give the popup real dimensions first.
           await p.setViewportSize({ width: 500, height: 760 }).catch(() => {})
-          await p.evaluate(() => { try { window.resizeTo(500, 760) } catch (e) {} }).catch(() => {})
+          await p.evaluate(() => { try { window.resizeTo(500, 760) } catch {} }).catch(() => {})
           await sleep(600)
           // The Amex SafeKey /otc SPA re-renders the OTP field on focus, detaching stale element
           // handles — so .fill()/keyboard.type into a now-detached node silently lost the digits
@@ -403,54 +397,25 @@ async function waitForConfirmation(ctx, timeoutMs) {
   // permanently shows "Your e-gift voucher will be sent..." which falsely looks like success.
   const urlRx = /order-confirmation|order[-_]?success|payment[-_]?success|order[-_]?placed|\/(success|confirmation|thank[-_]?you)\b/i
   while (Date.now() < end) {
-    for (const p of ctx.pages()) { try { if (urlRx.test(p.url())) return p } catch {} }
+    for (const p of ctx.pages()) {
+      try {
+        if (urlRx.test(p.url())) return p
+        for (const fr of [p, ...p.frames()]) {
+          const link = fr.getByText?.(/go to payment page/i)
+          if (link && (await link.first().isVisible({ timeout: 300 }).catch(() => false))) {
+            await link.first().click().catch(() => {})
+            log('Payment: advanced past processing interstitial')
+          }
+        }
+      } catch {}
+    }
     await sleep(2000)
   }
   await dumpAllPages(ctx) // screenshot every window so we can SEE why confirmation never appeared
   throw new Error('Timeout waiting for order-confirmation')
 }
 
-// Diagnostic: dump every frame's inputs (with attributes) + buttons so the SafeKey 3DS
-// OTP-field selector can be hardened from real runs.
-async function dump3ds(page) {
-  for (const fr of page.frames()) {
-    const url = fr.url().slice(0, 75)
-    const inputs = await fr.locator('input').evaluateAll((els) => els.map((e) => ({ t: e.type, n: e.name, id: e.id, ph: e.placeholder, ac: e.autocomplete, im: e.inputMode, ml: e.maxLength }))).catch(() => [])
-    const btns = await fr.locator('button, input[type=submit]').allInnerTexts().catch(() => [])
-    if (inputs.length || btns.length) log(`3DS FRAME [${url}] inputs=${JSON.stringify(inputs).slice(0, 400)} buttons=${JSON.stringify(btns).slice(0, 150)}`)
-  }
-}
-
 const OTP_FIELD = 'input[type="password"], input[autocomplete="one-time-code"], input[name*="otp" i], input[id*="otp" i], input[placeholder*="otp" i], input[placeholder*="code" i], input[inputmode="numeric"], input[type="tel"]'
-
-async function tryFill3ds(page, otp) {
-  const deadline = Date.now() + 90000
-  let dumped = false
-  while (Date.now() < deadline) {
-    // advance past the PineLabs "Processing… / Go to payment page" interstitial if present
-    for (const fr of [page, ...page.frames()]) {
-      const link = fr.getByText?.(/go to payment page/i)
-      if (link && (await link.first().isVisible({ timeout: 500 }).catch(() => false))) { await link.first().click().catch(() => {}); await sleep(2000) }
-    }
-    // one diagnostic dump of all frames once the 3DS UI has had a moment to render
-    if (!dumped && Date.now() - (deadline - 90000) > 6000) { await dump3ds(page); dumped = true }
-    // find an OTP field anywhere and fill it
-    for (const fr of [page, ...page.frames()]) {
-      const inp = fr.locator?.(OTP_FIELD)
-      if (inp && (await inp.first().isVisible({ timeout: 500 }).catch(() => false))) {
-        await fillOtp(fr, otp)
-        const submit = fr.getByRole('button', { name: /submit|continue|verify|confirm|pay|proceed/i }).or(fr.locator('input[type=submit]'))
-        if (await submit.first().isVisible({ timeout: 1000 }).catch(() => false)) await submit.first().click().catch(() => {})
-        log('3DS: filled OTP field')
-        return true
-      }
-    }
-    if (/order-confirmation/i.test(page.url())) return true
-    await sleep(2500)
-  }
-  await dump3ds(page) // final dump if we never found the field
-  return false
-}
 
 async function captureVoucher(page, sinceMs = 0) {
   // The order confirmation lists ONE row per voucher — a 1000+500 order = TWO vouchers / two codes.
@@ -474,12 +439,6 @@ async function captureVoucher(page, sinceMs = 0) {
     await sleep(5000)
   }
   return out
-}
-
-async function waitFor(fn, timeoutMs) {
-  const end = Date.now() + timeoutMs
-  while (Date.now() < end) { const v = fn(); if (v) return v; await sleep(500) }
-  return fn()
 }
 
 // ============================ one purchase ============================
@@ -567,7 +526,7 @@ if (require.main === module) {
     const app = express()
     app.use(express.json())
     let running = false
-    app.get('/health', (req, res) => res.json({ status: 'healthy', running }))
+    app.get('/health', (_req, res) => res.json({ status: 'healthy', running }))
     app.post('/run', async (req, res) => {
       if (running) return res.status(409).json({ error: 'already running' })
       running = true
@@ -580,8 +539,12 @@ if (require.main === module) {
     const PORT = parseInt(process.env.PORT || '3000', 10)
     app.listen(PORT, () => log(`ShopWise automation service on :${PORT}  (POST /run {plan|planFile, dryRun, only})`))
   } else if (args.plan) {
-    const plan = JSON.parse(fs.readFileSync(args.plan, 'utf8'))
-    runPlan(plan, { dryRun: args.dryRun, only: args.only })
+    Promise.resolve()
+      .then(() => {
+        try { return JSON.parse(fs.readFileSync(args.plan, 'utf8')) }
+        catch (e) { throw new Error(`Invalid plan: ${e.message}`) }
+      })
+      .then((plan) => runPlan(plan, { dryRun: args.dryRun, only: args.only }))
       .then(() => process.exit(0))
       .catch((e) => { log('Fatal:', e.message); process.exit(1) })
   } else {
@@ -590,4 +553,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { runPlan, buyVoucher, login, waitForOtp }
+module.exports = { runPlan, buyVoucher, login, waitForOtp, waitForConfirmation }
