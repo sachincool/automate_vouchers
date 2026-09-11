@@ -9,15 +9,15 @@ COPY package*.json ./
 # Install dependencies
 RUN npm install --omit=dev --no-package-lock
 
+# Install Playwright browsers (BEFORE copying app code so a code push reuses this ~10 min apt layer) - playwright-extra uses playwright internally
+# The base image already has browsers, but ensure they're available
+RUN npx playwright install chromium --with-deps || node ./node_modules/playwright-core/cli.js install chromium --with-deps || true
+
 # Copy application files
 COPY server.js ./
 COPY gyftr_automate.js ./
 COPY shopwise_automate.js ./
 COPY shopwise-plan.example.json ./
-
-# Install Playwright browsers - playwright-extra uses playwright internally
-# The base image already has browsers, but ensure they're available
-RUN npx playwright install chromium --with-deps || node ./node_modules/playwright-core/cli.js install chromium --with-deps || true
 
 # Create directory for screenshots
 RUN mkdir -p /app/screenshots
