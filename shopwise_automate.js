@@ -83,6 +83,12 @@ async function reportTransaction(tx) {
   }
 }
 
+// OTPs already consumed by this process. The n8n store keeps ONE expires_at for ALL keys, so any
+// later SMS (e.g. the previous purchase's voucher delivery) bumps it and makes a stale payment_otp
+// look freshly created → on purchase 2+ we typed the old code into SafeKey. Never reuse a value.
+// ponytail: process-lifetime Set; OTPs are random 4-6 digits so excluding old ones forever is harmless.
+const usedOtps = new Set();
+
 async function waitForOtp(
   type,
   { timeoutMs = 120000, sinceServer = null, ttlMs = 40000 } = {},
@@ -92,19 +98,23 @@ async function waitForOtp(
   await sleep(2000);
   while (Date.now() - start < timeoutMs) {
     const s = await getState();
-    if (s && s.success && s[type] && s.timestamp && s.expires_at) {
+    const v = s && s.success ? s[type] : null;
+    const unused = v && !usedOtps.has(`${type}:${v}`);
+    if (unused && s.timestamp && s.expires_at) {
       const serverNow = new Date(s.timestamp).getTime();
       const expiry = new Date(s.expires_at).getTime();
       const createdAt = expiry - ttlMs;
       const notExpired = serverNow < expiry;
       const fresh = sinceServer == null || createdAt >= sinceServer - 3000; // created after we requested
       if (notExpired && fresh) {
-        log(`Got ${type}: ${s[type]}`);
-        return s[type];
+        usedOtps.add(`${type}:${v}`);
+        log(`Got ${type}: ${v}`);
+        return v;
       }
-    } else if (s && s.success && s[type] && !s.expires_at) {
-      log(`Got ${type}: ${s[type]}`);
-      return s[type];
+    } else if (unused && !s.expires_at) {
+      usedOtps.add(`${type}:${v}`);
+      log(`Got ${type}: ${v}`);
+      return v;
     }
     await sleep(3000);
   }
@@ -708,32 +718,37 @@ async function captureVoucher(page, sinceMs = 0) {
   const body = (await page.textContent("body").catch(() => "")) || "";
   const codes = [
     ...new Set([...body.matchAll(/\b([0-9]{12,19})\b/g)].map((m) => m[1])),
-  ];
+  ].filter((c) => !seenCodes.has(c));
   if (codes.length) {
     out.vouchers = codes.map((c) => ({ code: c }));
-    return out;
-  }
-  // Most brands deliver the voucher by SMS/email AFTER the order, not on the page. Poll the n8n
-  // ledger for FRESH vouchers (ts created after THIS purchase started). NEVER fall back to
-  // pre-existing/stale vouchers — that once attached the wrong brand's codes to a transaction.
-  const end = Date.now() + 90000;
-  while (Date.now() < end) {
-    const s = await getState();
-    const fresh = (s && Array.isArray(s.vouchers) ? s.vouchers : []).filter(
-      (v) =>
-        v &&
-        v.ts &&
-        Date.parse(v.ts) >= sinceMs &&
-        (v.source || "") !== "automation",
-    );
-    if (fresh.length) {
-      out.vouchers = fresh.slice(0, 4);
-      break;
+  } else {
+    // Most brands deliver the voucher by SMS/email AFTER the order, not on the page. Poll the n8n
+    // ledger for FRESH vouchers (ts created after THIS purchase started). NEVER fall back to
+    // pre-existing/stale vouchers — that once attached the wrong brand's codes to a transaction.
+    // Codes already attributed to an earlier purchase in this run are skipped too (a late SMS
+    // from purchase N otherwise lands on purchase N+1 whose baseline it also postdates).
+    const end = Date.now() + 90000;
+    while (Date.now() < end) {
+      const s = await getState();
+      const fresh = (s && Array.isArray(s.vouchers) ? s.vouchers : []).filter(
+        (v) =>
+          v &&
+          v.ts &&
+          Date.parse(v.ts) >= sinceMs &&
+          (v.source || "") !== "automation" &&
+          !seenCodes.has(v.code),
+      );
+      if (fresh.length) {
+        out.vouchers = fresh.slice(0, 4);
+        break;
+      }
+      await sleep(5000);
     }
-    await sleep(5000);
   }
+  for (const v of out.vouchers) seenCodes.add(v.code);
   return out;
 }
+const seenCodes = new Set(); // voucher codes already attributed to a purchase in this process
 
 // ============================ one purchase ============================
 async function buyVoucher(
@@ -758,6 +773,13 @@ async function buyVoucher(
     0,
   );
 
+  // Close windows left over from the previous purchase (SafeKey popup / its order-confirmation).
+  // fill3dsAcrossPages + waitForConfirmation scan EVERY page in the context, so a stale
+  // order-confirmation window made purchase 2+ report "confirmed" instantly without ever
+  // entering the new OTP — and captureVoucher then scraped the OLD codes off it.
+  for (const p of page.context().pages())
+    if (p !== page) await p.close().catch(() => {});
+
   await ensureLoggedIn(page);
   const buyNow = await selectDenominations(page, productId, job.denominations);
   if (dryRun) {
@@ -773,7 +795,7 @@ async function buyVoucher(
     .first()
     .scrollIntoViewIfNeeded()
     .catch(() => {});
-  const buyStart = await serverNowMs().catch(() => Date.now()); // baseline: only vouchers created after this count
+  const buyStart = (await serverNowMs()) ?? Date.now(); // baseline: only vouchers created after this count (null → everything looked fresh)
   await buyNow
     .first()
     .click({ timeout: 8000 })
@@ -874,25 +896,32 @@ if (require.main === module) {
   if (args.serve) {
     const app = express();
     app.use(express.json());
-    let running = false;
-    app.get("/health", (_req, res) => res.json({ status: "healthy", running }));
-    app.post("/run", async (req, res) => {
-      if (running) return res.status(409).json({ error: "already running" });
-      running = true;
-      try {
-        const plan =
-          req.body.plan ||
-          JSON.parse(fs.readFileSync(req.body.planFile, "utf8"));
-        const results = await runPlan(plan, {
-          dryRun: !!req.body.dryRun,
-          only: req.body.only ?? null,
-        });
-        res.json({ ok: true, results });
-      } catch (e) {
-        res.status(500).json({ ok: false, error: e.message });
-      } finally {
-        running = false;
-      }
+    // Runs are serialized through a promise chain: a second form submit while one is in flight
+    // used to get a 409 (n8n showed an error). Now it waits its turn — one browser, one OTP
+    // stream, one purchase at a time. ponytail: in-memory queue; lost on restart, fine.
+    let queue = Promise.resolve();
+    let running = 0;
+    app.get("/health", (_req, res) =>
+      res.json({ status: "healthy", running: running > 0, queued: running }),
+    );
+    app.post("/run", (req, res) => {
+      running++;
+      queue = queue.then(async () => {
+        try {
+          const plan =
+            req.body.plan ||
+            JSON.parse(fs.readFileSync(req.body.planFile, "utf8"));
+          const results = await runPlan(plan, {
+            dryRun: !!req.body.dryRun,
+            only: req.body.only ?? null,
+          });
+          res.json({ ok: true, results });
+        } catch (e) {
+          res.status(500).json({ ok: false, error: e.message });
+        } finally {
+          running--;
+        }
+      });
     });
     const PORT = parseInt(process.env.PORT || "3000", 10);
     app.listen(PORT, () =>
