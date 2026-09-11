@@ -842,7 +842,16 @@ async function runPlan(plan, { dryRun = false, only = null } = {}) {
   const page = await ctx.newPage();
   const results = [];
   try {
-    await login(page);
+    await login(page).catch(async (e) => {
+      // Screenshot the SSO page so "no OTP arrived" can be told apart from "OTP throttled/rejected".
+      await page
+        .screenshot({ path: "/app/screenshots/login-failed.png", fullPage: true })
+        .catch(() => {});
+      const txt = ((await page.locator("body").innerText().catch(() => "")) || "")
+        .replace(/\s+/g, " ")
+        .slice(0, 300);
+      throw new Error(`${e.message} — SSO page said: "${txt}"`);
+    });
     for (const job of jobs) {
       const reps = job.count || 1;
       for (let r = 1; r <= reps; r++) {
