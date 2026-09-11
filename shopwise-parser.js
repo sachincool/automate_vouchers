@@ -82,8 +82,8 @@ function parsePaymentOTP(c) {
   return { success: false, type: 'payment_otp', error: 'no payment OTP' }
 }
 function parseVoucher(c) {
-  const code = (c.match(/Voucher\s*Details\s*:?\s*([A-Z0-9]{6,20})/i) || c.match(/(?:voucher|gift\s*card|code)\s*:?\s*([A-Z0-9]{8,16})/i) || [])[1] || null
-  const pin = (c.match(/Additional\s*Details\s*:?\s*([A-Z0-9]{4,20})/i) || c.match(/PIN\s*:?\s*([A-Z0-9]{4,8})/i) || [])[1] || null
+  const code = (c.match(/Voucher\s*Details\s*:?\s*(?:Number\s*)?([A-Z0-9]{6,20})/i) || c.match(/(?:voucher|gift\s*card|code)\s*:?\s*([A-Z0-9]{8,16})/i) || [])[1] || null
+  const pin = (c.match(/Additional\s*Details\s*:?\s*(?:Pin\s*)?([A-Z0-9]{4,20})/i) || c.match(/PIN\s*:?\s*([A-Z0-9]{4,8})/i) || [])[1] || null
   const value = (c.match(/Value\s*:?\s*(\d{2,7})/i) || [])[1] || null
   const validity = (c.match(/Valid\s*till\s*([\d-]+)/i) || [])[1] || null
   const brand = (c.match(/your\s+(.+?)\s+E-?Gift\s+Voucher/i) || [])[1] || null
