@@ -229,12 +229,17 @@ async function clickish(page, rx, timeout = 25000) {
 }
 
 // ============================ flow steps ============================
+const onSso = (page) => /sso\.ai-loyalty\.com/i.test(page.url());
+
 async function login(page) {
-  log("Login: navigating…");
-  await page.goto(SHOPWISE_LOGIN_URL, {
-    waitUntil: "domcontentloaded",
-    timeout: 60000,
-  });
+  // Already bounced onto the SSO form (e.g. Continue on /giftcard while logged out)? Use it as-is.
+  if (!onSso(page)) {
+    log("Login: navigating…");
+    await page.goto(SHOPWISE_LOGIN_URL, {
+      waitUntil: "domcontentloaded",
+      timeout: 60000,
+    });
+  } else log("Login: on SSO page");
   const mobile = page.locator('input[type="tel"]');
   await mobile.waitFor({ state: "visible", timeout: 30000 });
   await mobile.fill(MOBILE);
@@ -289,11 +294,14 @@ async function ensureLoggedIn(page) {
   const loginBtn = page
     .getByRole("link", { name: /^Login$/i })
     .or(page.getByText(/^Login$/));
+  // ponytail: the header renders late on the server; 3s missed it and we shopped logged-out.
+  // selectDenominations catches the SSO bounce as a backstop, so a miss here only costs a retry.
   if (
-    await loginBtn
+    onSso(page) ||
+    (await loginBtn
       .first()
-      .isVisible({ timeout: 3000 })
-      .catch(() => false)
+      .isVisible({ timeout: 10000 })
+      .catch(() => false))
   ) {
     await login(page);
   }
@@ -355,6 +363,13 @@ async function selectDenominations(page, brandProductId, denominations) {
   }
   await clickish(page, /^Continue$/i);
   await page.waitForLoadState("domcontentloaded");
+  await sleep(1500);
+  // Logged out (session file stale / header check missed): /card bounces to SSO. Log in there, redo.
+  if (onSso(page) || (await page.locator('input[type="tel"]').isVisible({ timeout: 1500 }).catch(() => false))) {
+    log("Checkout bounced to SSO — logging in and retrying");
+    await login(page);
+    return selectDenominations(page, brandProductId, denominations);
+  }
   // Wait for /card to actually RENDER before nudging — it loads slower on the server, and a
   // fixed sleep fired while the page was still a spinner (steppers absent) → nudge no-op → ₹0.
   await page
