@@ -14,13 +14,27 @@
               "fieldType": "dropdown",
               "fieldOptions": {
                 "values": [
-                  { "option": "Amazon Pay ₹1,000 — Gold Charge" },
-                  { "option": "Amazon Pay ₹1,500 — MRCC (1000+500)" },
-                  { "option": "Amazon Pay ₹2,500 — MRCC" },
-                  { "option": "Amazon Pay ₹5,000 — MRCC" },
-                  { "option": "Swiggy ₹1,000 — Gold Charge" },
-                  { "option": "Swiggy ₹1,500 — MRCC (1000+500)" },
-                  { "option": "Swiggy ₹2,000 — MRCC" }
+                  {
+                    "option": "Amazon Pay ₹1,000 — Gold Charge"
+                  },
+                  {
+                    "option": "Amazon Pay ₹1,500 — MRCC (1000+500)"
+                  },
+                  {
+                    "option": "Amazon Pay ₹2,500 — MRCC"
+                  },
+                  {
+                    "option": "Amazon Pay ₹5,000 — MRCC"
+                  },
+                  {
+                    "option": "Swiggy ₹1,000 — Gold Charge"
+                  },
+                  {
+                    "option": "Swiggy ₹1,500 — MRCC (1000+500)"
+                  },
+                  {
+                    "option": "Swiggy ₹2,000 — MRCC"
+                  }
                 ]
               },
               "requiredField": true
@@ -35,8 +49,12 @@
               "fieldType": "dropdown",
               "fieldOptions": {
                 "values": [
-                  { "option": "Dry run (no charge)" },
-                  { "option": "Buy for real" }
+                  {
+                    "option": "Dry run (no charge)"
+                  },
+                  {
+                    "option": "Buy for real"
+                  }
                 ]
               },
               "requiredField": true
@@ -49,7 +67,10 @@
       "name": "Buy Voucher Form",
       "type": "n8n-nodes-base.formTrigger",
       "typeVersion": 2.1,
-      "position": [240, 300],
+      "position": [
+        240,
+        300
+      ],
       "webhookId": "b1f0c001-0001-4001-8001-000000000f01"
     },
     {
@@ -60,7 +81,10 @@
       "name": "Build Plan from selection",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [480, 300]
+      "position": [
+        480,
+        300
+      ]
     },
     {
       "parameters": {
@@ -69,33 +93,73 @@
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ { dryRun: $json.dryRun, plan: $json.plan } }}",
-        "options": { "timeout": 1800000 }
+        "options": {
+          "timeout": 1800000
+        }
       },
       "id": "b1f0c001-0003-4003-8003-000000000003",
       "name": "Run Automation (server-side)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [720, 300]
+      "position": [
+        720,
+        300
+      ]
     },
     {
       "parameters": {
         "operation": "completion",
-        "completionTitle": "Done ✅",
-        "completionMessage": "={{ (() => { const r = $json; const res = Array.isArray(r.results) ? r.results : []; const ok = res.filter(x => x && x.ok).length; const codes = []; for (const x of res) if (x && x.voucher && Array.isArray(x.voucher.vouchers)) for (const v of x.voucher.vouchers) codes.push(v.pin ? `${v.code} (PIN: ${v.pin})` : v.code); return `${ok}/${res.length} purchase(s) completed` + (res[0] && res[0].dryRun ? ' (dry run — nothing charged)' : '') + (codes.length ? '. Voucher codes: ' + codes.join(', ') : '. Vouchers will arrive by SMS/email.'); })() }}",
+        "completionTitle": "={{ (Array.isArray($json.results) ? $json.results : []).some(x => x && x.ok) ? ((Array.isArray($json.results) ? $json.results : []).every(x => x && x.ok) ? 'Done ✅' : 'Partly done ⚠️') : 'Failed ❌' }}",
+        "completionMessage": "={{ (() => { const r = $json; const res = Array.isArray(r.results) ? r.results : []; const ok = res.filter(x => x && x.ok).length; const codes = []; for (const x of res) if (x && x.voucher && Array.isArray(x.voucher.vouchers)) for (const v of x.voucher.vouchers) codes.push(v.pin ? `${v.code} (PIN: ${v.pin})` : v.code); const errs = [...new Set(res.filter(x => x && !x.ok).map(x => String(x.error || '').split('\\n')[0].slice(0, 160)))]; return `${ok}/${res.length} purchase(s) completed` + (res[0] && res[0].dryRun ? ' (dry run — nothing charged)' : '') + (codes.length ? '. Voucher codes: ' + codes.join(', ') : (ok ? '. Vouchers will arrive by SMS/email.' : '.')) + (errs.length ? ' Failures: ' + errs.join(' | ') : ''); })() }}",
         "options": {}
       },
       "id": "b1f0c001-0004-4004-8004-000000000004",
       "name": "Show result",
       "type": "n8n-nodes-base.form",
       "typeVersion": 1,
-      "position": [960, 300]
+      "position": [
+        960,
+        300
+      ]
     }
   ],
   "connections": {
-    "Buy Voucher Form": { "main": [[{ "node": "Build Plan from selection", "type": "main", "index": 0 }]] },
-    "Build Plan from selection": { "main": [[{ "node": "Run Automation (server-side)", "type": "main", "index": 0 }]] },
-    "Run Automation (server-side)": { "main": [[{ "node": "Show result", "type": "main", "index": 0 }]] }
+    "Buy Voucher Form": {
+      "main": [
+        [
+          {
+            "node": "Build Plan from selection",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Plan from selection": {
+      "main": [
+        [
+          {
+            "node": "Run Automation (server-side)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Automation (server-side)": {
+      "main": [
+        [
+          {
+            "node": "Show result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
   },
   "active": false,
-  "settings": { "executionOrder": "v1" }
+  "settings": {
+    "executionOrder": "v1"
+  }
 }

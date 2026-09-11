@@ -352,7 +352,22 @@ async function selectDenominations(page, brandProductId, denominations) {
         break;
       }
     }
-    if (!target) throw new Error(`Denomination ${price} not found for product`);
+    if (!target) {
+      // Tiles flip to "Out of Stock" (no stepper) per denomination — say so instead of "not found".
+      const oos = await page
+        .locator(`text=/${price.replace(/[,]/g, ",?")}.*Out of Stock|Out of Stock.*${price.replace(/[,]/g, ",?")}/i`)
+        .count()
+        .catch(() => 0);
+      const row = await page
+        .locator("xpath=//*[contains(normalize-space(.),'" + price + "') and .//*[contains(.,'Out of Stock')]]")
+        .count()
+        .catch(() => 0);
+      throw new Error(
+        oos || row
+          ? `OUT_OF_STOCK — ${price} is out of stock for this brand right now`
+          : `Denomination ${price} not found for product`,
+      );
+    }
     for (let i = 0; i < qty; i++) {
       await target.scrollIntoViewIfNeeded().catch(() => {});
       await target.click({ timeout: 8000 }).catch(async () => {
