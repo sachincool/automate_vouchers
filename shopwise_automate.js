@@ -39,6 +39,11 @@ const {
 } = process.env;
 
 const HEADFUL = String(HEADLESS).toLowerCase() === "false";
+// Persisted browser cookies so back-to-back runs reuse the ShopWise session instead of burning a
+// login OTP each time (ShopWise drops many OTP SMS). Lives on the screenshots volume in the container.
+const SESSION_FILE =
+  process.env.SESSION_FILE ||
+  (fs.existsSync("/app/screenshots") ? "/app/screenshots/session.json" : "shopwise-session.json");
 const MANUAL = String(MANUAL_3DS).toLowerCase() === "true";
 const log = (...a) => console.log(new Date().toISOString(), ...a);
 
@@ -242,10 +247,18 @@ async function login(page) {
   // (seen 2026-09-11: 16:55's code arrived 17:00, alongside the fresh one) — it's already invalid
   // server-side, so Validate silently stays on the form. Try the next unused OTP, up to 3 times.
   for (let attempt = 1; ; attempt++) {
-    const otp = await waitForOtp("login_otp", {
-      timeoutMs: attempt === 1 ? 120000 : 60000,
-      sinceServer,
-    });
+    // ShopWise drops a good share of OTP SMS outright (5 of 8 never delivered on 2026-09-11).
+    // Don't sit out 120s: after 60s click "Resend OTP" (enabled after its 30s countdown) and wait again.
+    let otp = null;
+    for (let send = 1; send <= 3 && !otp; send++) {
+      otp = await waitForOtp("login_otp", { timeoutMs: 60000, sinceServer }).catch(() => null);
+      if (otp) break;
+      const resend = page.getByText(/Resend OTP/i).first();
+      if (!(await resend.isVisible({ timeout: 1000 }).catch(() => false))) continue;
+      await resend.click().catch(() => {});
+      log(`Login: no OTP in 60s — clicked Resend OTP (${send}/3)`);
+    }
+    if (!otp) throw new Error("Timeout waiting for login_otp (after 2 resends)");
     await fillOtp(page, otp);
     await sleep(600);
     await page.getByRole("button", { name: /Validate and Login/i }).click();
@@ -262,6 +275,7 @@ async function login(page) {
     for (const b of await page.locator('input[type="password"]').all())
       await b.fill("").catch(() => {});
   }
+  await page.context().storageState({ path: SESSION_FILE }).catch(() => {});
   log("Login: success");
 }
 
@@ -855,11 +869,12 @@ async function runPlan(plan, { dryRun = false, only = null } = {}) {
     locale: "en-IN",
     timezoneId: process.env.TZ || "Asia/Kolkata",
     ignoreHTTPSErrors: true,
+    storageState: fs.existsSync(SESSION_FILE) ? SESSION_FILE : undefined,
   });
   const page = await ctx.newPage();
   const results = [];
   try {
-    await login(page).catch(async (e) => {
+    await ensureLoggedIn(page).catch(async (e) => {
       // Screenshot the SSO page so "no OTP arrived" can be told apart from "OTP throttled/rejected".
       await page
         .screenshot({ path: "/app/screenshots/login-failed.png", fullPage: true })
