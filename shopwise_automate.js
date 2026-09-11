@@ -238,13 +238,30 @@ async function login(page) {
     .getByRole("button", { name: /Get OTP & Continue/i })
     .first()
     .click();
-  const otp = await waitForOtp("login_otp", { timeoutMs: 120000, sinceServer });
-  await fillOtp(page, otp);
-  await sleep(600);
-  await page.getByRole("button", { name: /Validate and Login/i }).click();
-  await page.waitForURL((u) => u.host.includes("giftstacc.com"), {
-    timeout: 60000,
-  });
+  // ShopWise SMS delivery lags: a delayed OTP from an EARLIER request can land after this one
+  // (seen 2026-09-11: 16:55's code arrived 17:00, alongside the fresh one) — it's already invalid
+  // server-side, so Validate silently stays on the form. Try the next unused OTP, up to 3 times.
+  for (let attempt = 1; ; attempt++) {
+    const otp = await waitForOtp("login_otp", {
+      timeoutMs: attempt === 1 ? 120000 : 60000,
+      sinceServer,
+    });
+    await fillOtp(page, otp);
+    await sleep(600);
+    await page.getByRole("button", { name: /Validate and Login/i }).click();
+    const ok = await page
+      .waitForURL((u) => u.host.includes("giftstacc.com"), { timeout: 30000 })
+      .then(() => true)
+      .catch(() => false);
+    if (ok) break;
+    const txt = ((await page.locator("body").innerText().catch(() => "")) || "")
+      .replace(/\s+/g, " ")
+      .slice(0, 200);
+    log(`Login: OTP ${otp} not accepted (attempt ${attempt}) — page: "${txt}"`);
+    if (attempt >= 3) throw new Error(`Login failed after ${attempt} OTPs — SSO page: "${txt}"`);
+    for (const b of await page.locator('input[type="password"]').all())
+      await b.fill("").catch(() => {});
+  }
   log("Login: success");
 }
 
