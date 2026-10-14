@@ -370,9 +370,8 @@ async function selectDenominations(page, brandProductId, denominations) {
     }
     for (let i = 0; i < qty; i++) {
       await target.scrollIntoViewIfNeeded().catch(() => {});
-      await target.click({ timeout: 8000 }).catch(async () => {
-        await target.click({ force: true });
-      });
+      // Each cart click blocks ~10s server-side; a short timeout + force retry added the voucher twice.
+      await target.click({ timeout: 30000 });
       await sleep(500);
     }
   }
@@ -397,12 +396,14 @@ async function selectDenominations(page, brandProductId, denominations) {
   // On /card the order total reads ₹0 until each row's qty stepper ("+"/"-") is exercised
   // (the /giftcard pre-selection only populates the rows). Nudge +1 then −1 on every row to
   // commit the quantities, then confirm a non-zero total before paying.
-  const plusBtns = await page.getByRole("button", { name: "+" }).all();
+  // Each click costs ~12s, so only nudge when the total actually reads ₹0.
+  const preTotal = (await page.locator("button").filter({ hasText: /Buy now with/i }).first().textContent().catch(() => "")) || "";
+  const plusBtns = /[1-9]/.test(preTotal.replace(/buy now with/i, "")) ? [] : await page.getByRole("button", { name: "+" }).all();
   for (const b of plusBtns) {
     await b.click().catch(() => {});
     await sleep(350);
   }
-  const minusBtns = await page.getByRole("button", { name: "-" }).all();
+  const minusBtns = plusBtns.length ? await page.getByRole("button", { name: "-" }).all() : [];
   for (const b of minusBtns) {
     await b.click().catch(() => {});
     await sleep(350);
@@ -978,7 +979,7 @@ async function runPlan(plan, { dryRun = false, only = null } = {}) {
     ignoreHTTPSErrors: true,
     storageState: fs.existsSync(SESSION_FILE) ? SESSION_FILE : undefined,
   });
-  const page = await ctx.newPage();
+  let page = await ctx.newPage();
   const results = [];
   try {
     await ensureLoggedIn(page).catch(async (e) => {
@@ -996,6 +997,11 @@ async function runPlan(plan, { dryRun = false, only = null } = {}) {
       for (let r = 1; r <= reps; r++) {
         const label = `${job.name || job.brand} [${r}/${reps}]`;
         log(`\n=== ${label} ===`);
+        // Reusing the tab after a checkout leaves /giftcard without a Continue button; a fresh tab works.
+        if (results.length) {
+          await page.close().catch(() => {});
+          page = await ctx.newPage();
+        }
         try {
           const res = await buyVoucher(page, job, cardsMap, brandsMap, {
             dryRun,
