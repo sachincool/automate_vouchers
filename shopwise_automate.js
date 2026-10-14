@@ -376,6 +376,7 @@ async function selectDenominations(page, brandProductId, denominations) {
       await sleep(500);
     }
   }
+  // With a remembered cart, the tile click jumps straight to /card (no Continue there).
   await clickish(page, /^Continue$/i);
   await page.waitForLoadState("domcontentloaded");
   await sleep(1500);
@@ -406,6 +407,31 @@ async function selectDenominations(page, brandProductId, denominations) {
     await b.click().catch(() => {});
     await sleep(350);
   }
+  // ShopWise keeps the cart server-side between orders: the last purchase's qty (or an SSO-bounce
+  // double-add) survives the nudge above. Drive every /card row to EXACTLY the plan's qty.
+  const want = Object.fromEntries(denominations.map((d) => [d.amount, d.qty]));
+  for (let pass = 0; pass < 20; pass++) {
+    let changed = false;
+    for (const minus of await page.getByRole("button", { name: "-" }).all()) {
+      let row, m;
+      for (let up = 1; up <= 5 && !m; up++) {
+        row = minus.locator(`xpath=ancestor::*[${up}]`);
+        m = ((await row.innerText({ timeout: 1500 }).catch(() => "")) || "")
+          .replace(/\s+/g, " ")
+          .match(/₹\s*([\d,]+)\s*-\s*(\d+)\s*\+/);
+      }
+      if (!m) continue;
+      const have = Number(m[2]);
+      const need = want[Number(m[1].replace(/,/g, ""))] ?? 0;
+      if (have === need) continue;
+      const btn = have > need ? minus : row.getByRole("button", { name: "+" }).first();
+      await btn.click().catch(() => {});
+      await sleep(600);
+      changed = true;
+      break; // re-query: rows re-render (and a row at 0 may vanish) after each click
+    }
+    if (!changed) break;
+  }
   await page
     .screenshot({ path: "shopwise-card-stage.png", fullPage: true })
     .catch(() => {});
@@ -427,6 +453,12 @@ async function selectDenominations(page, brandProductId, denominations) {
     throw new Error(
       "Checkout total is ₹0 after qty nudge — order not registered",
     );
+  // Never pay a total the plan didn't ask for: an SSO bounce mid-checkout left the first pick in the
+  // cart and the retry added it again (₹1,000 plan charged ₹2,000). Allow ~3% for brand fees (Amazon).
+  const expected = denominations.reduce((s, d) => s + d.amount * d.qty, 0);
+  const shown = Number(label.replace(/buy now with/i, "").replace(/[^\d.]/g, ""));
+  if (!(shown >= expected && shown <= expected * 1.03))
+    throw new Error(`WRONG_TOTAL — checkout shows ₹${shown}, plan is ₹${expected}. Not paying.`);
   // Merchant caps each brand at a monthly ₹ limit. When hit, the Buy-now button is DISABLED and a
   // banner shows — clicking does nothing, so the gateway never opens and payment would hang. Detect + fail fast.
   const limitBanner = await page
@@ -506,7 +538,11 @@ async function payWithSavedCard(page, cardIndex) {
     );
   }
 
-  // SafeKey 3DS: fetch a FRESH payment OTP (created after we triggered pay).
+  // SafeKey 3DS: fetch a FRESH payment OTP (created after we triggered pay). Meanwhile keep the
+  // SafeKey popup alive: it opens 0-width, and on failed runs it sat with no OTP field and no SMS
+  // was ever sent — so give it layout NOW (not only after an OTP arrives) and log what it shows.
+  let waiting = true;
+  const watcher = watchSafeKeyPopup(ctx, () => waiting);
   const otp = await waitForOtp("payment_otp", {
     timeoutMs: 240000,
     sinceServer,
@@ -514,6 +550,8 @@ async function payWithSavedCard(page, cardIndex) {
     log(e.message);
     return null;
   });
+  waiting = false;
+  await watcher;
   if (otp && !MANUAL) {
     log(`>>> SafeKey OTP: ${otp} <<<  (auto-filling across all windows)`);
     const filled = await fill3dsAcrossPages(ctx, otp).catch(() => false);
@@ -530,6 +568,42 @@ async function payWithSavedCard(page, cardIndex) {
   const confPage = await waitForConfirmation(ctx, 240000);
   log("Payment: order confirmed");
   return confPage;
+}
+
+// While waiting for the SafeKey SMS: size the popup, log its text on every change, and after 75s
+// with no OTP click its Resend link once (normal OTPs arrive in 15-30s).
+// shortcut: a late original SMS could still win over the resent one; add a second fill attempt if seen.
+async function watchSafeKeyPopup(ctx, isWaiting) {
+  const t0 = Date.now();
+  let last = "";
+  let resent = false;
+  while (isWaiting()) {
+    for (const p of ctx.pages()) {
+      if (!/safekey|americanexpress/i.test(p.url())) continue;
+      try {
+        await p.setViewportSize({ width: 500, height: 760 }).catch(() => {});
+        const txt = (
+          (await p.locator("body").innerText({ timeout: 1000 }).catch(() => "")) || ""
+        )
+          .replace(/\s+/g, " ")
+          .slice(0, 300);
+        if (txt !== last) {
+          log(`SafeKey popup (${Math.round((Date.now() - t0) / 1000)}s): "${txt}"`);
+          last = txt;
+          await p.screenshot({ path: "safekey-waiting.png" }).catch(() => {});
+        }
+        if (!resent && Date.now() - t0 > 75000) {
+          const r = p.getByText(/resend/i).first();
+          if (await r.isVisible({ timeout: 300 }).catch(() => false)) {
+            await r.click().catch(() => {});
+            resent = true;
+            log("SafeKey: no OTP after 75s — clicked Resend");
+          }
+        }
+      } catch {}
+    }
+    await sleep(3000);
+  }
 }
 
 // Scan EVERY page in the context (incl. the SafeKey 3DS popup) and their frames for the
@@ -695,7 +769,10 @@ async function fill3dsAcrossPages(ctx, otp) {
 async function dumpAllPages(ctx) {
   let i = 0;
   for (const p of ctx.pages()) {
-    log(`PAGE [${p.url().slice(0, 75)}]`);
+    const txt = ((await p.locator("body").innerText({ timeout: 1000 }).catch(() => "")) || "")
+      .replace(/\s+/g, " ")
+      .slice(0, 200);
+    log(`PAGE [${p.url().slice(0, 75)}] text="${txt}"`);
     await p.screenshot({ path: `stuck-page-${i++}.png` }).catch(() => {});
     for (const fr of p.frames()) {
       const inputs = await fr
