@@ -376,7 +376,13 @@ async function selectDenominations(page, brandProductId, denominations) {
     }
   }
   // With a remembered cart, the tile click jumps straight to /card (no Continue there).
-  await clickish(page, /^Continue$/i);
+  const cont = page.getByText(/^Continue$/i).first();
+  await cont
+    .or(page.locator("button").filter({ hasText: /Buy now with/i }).first())
+    .first()
+    .waitFor({ state: "visible", timeout: 25000 });
+  if (await cont.isVisible().catch(() => false)) await clickish(page, /^Continue$/i);
+  else log("  cart remembered — already on /card");
   await page.waitForLoadState("domcontentloaded");
   await sleep(1500);
   // Logged out (session file stale / header check missed): /card bounces to SSO. Log in there, redo.
