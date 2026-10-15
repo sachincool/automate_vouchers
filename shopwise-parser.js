@@ -127,8 +127,6 @@ try {
     return [{ json: { success: true, content_type: 'reset', current_globals: getOtp(), ledger: ledgerSummary(), timestamp: now(), message: 'Ledger reset' } }]
   }
 
-  clearExpiredOtp()
-
   // extract SMS content
   let content = ''
   if (body && body.message) content = body.message
@@ -144,6 +142,9 @@ try {
     const g = getOtp()
     return [{ json: { success: true, content_type: 'status_check', current_globals: g, ledger: ledgerSummary(), data_validity: { is_valid: otpValid(), expires_at: g.expires_at }, timestamp: now(), message: 'Status check successful' } }]
   }
+
+  // Only SMS writes clear expired OTPs: a poll that wrote here saved its stale copy over a concurrent SMS (lost 9389 on 2026-10-15).
+  clearExpiredOtp()
 
   let parse, storage
   switch (ct) {
