@@ -1,0 +1,14 @@
+{
+  "//": "Swiggy Money E-Gift Voucher — MRCC ₹1,500 milestone transaction (1000+500). Separate ₹20k/month limit from Amazon Pay.",
+  "brands": { "swiggy": "67QXkJBH5ual2f8tm2sCvQ==" },
+  "cards": { "mrcc": 1 },
+  "jobs": [
+    {
+      "name": "MRCC Rs.1500 Swiggy (1000+500)",
+      "card": "mrcc",
+      "brand": "swiggy",
+      "denominations": [{ "amount": 1000, "qty": 1 }, { "amount": 500, "qty": 1 }],
+      "count": 1
+    }
+  ]
+}
